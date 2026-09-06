@@ -50,12 +50,31 @@ def test_the_engine_pin_is_high_enough_for_the_glyphs_it_uses():
     assert any(d.replace(" ", "") == "magmacrunch>=0.7.1" for d in deps), deps
 
 
-def test_the_entry_point_names_a_module_that_exists():
+def test_the_entry_point_names_something_that_exists():
     """An entry point is metadata nothing validates at install time, so a typo
-    installs cleanly and only surfaces as a cabinet the arcade cannot load."""
+    installs cleanly and only surfaces as a cabinet the arcade cannot load.
+
+    Checked by reading the file rather than importing it. The first version
+    imported ``jovian.arcade`` to prove the object was really there, which
+    quietly broke this file's whole promise — that it needs no engine — and
+    passed locally, where the engine happens to be installed, while failing in
+    the one job that installs nothing. The import is not missed: test_app.py
+    imports GAME for real, and skips itself where the engine is absent.
+    """
+    import ast
+
     group = _pyproject()["project"]["entry-points"]["magmacrunch.games"]
     assert group == {"jovian": "jovian.arcade:GAME"}
 
-    from jovian.arcade import GAME
+    module, _, attribute = group["jovian"].partition(":")
+    path = pathlib.Path(__file__).resolve().parent.parent.joinpath(
+        *module.split(".")).with_suffix(".py")
+    assert path.exists(), f"{module} names no file"
 
-    assert GAME.info.key
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    assigned = {
+        target.id
+        for node in tree.body if isinstance(node, ast.Assign)
+        for target in node.targets if isinstance(target, ast.Name)
+    }
+    assert attribute in assigned, f"{module} defines no {attribute}"
