@@ -9,6 +9,13 @@
 # The tui/ job runs the ported rules two ways: on their own, with nothing but
 # pytest installed, and against the shipped JavaScript through a node oracle.
 # The second is why this job needs node as well as Python.
+#
+# The wii/ job has no oracle to run — see wii/AGENTS.md for why one is not
+# cheap there — so its whole claim to being the same game rests on its own
+# suite, which is the web suite's cases ported case for case. That makes the
+# engine-free check below load-bearing rather than tidy: the day sim.c includes
+# grrlib.h, the job stops being able to link it and the port has nothing
+# checking it at all.
 
 name: CI
 
@@ -60,3 +67,33 @@ jobs:
       - name: Lint
         working-directory: tui
         run: ruff check .
+
+  # The same rules again, in C. The host tests need nothing but a compiler --
+  # source/sim.c and source/projection.c are free of libogc and GRRLIB -- so
+  # they run on a GitHub-hosted runner. The devkitPPC build is not included,
+  # matching magnolia and the other magnolia games: it needs the self-hosted
+  # runner, and that job stays out until its label is confirmed.
+  #
+  # Two versions of one game are only one game for as long as something keeps
+  # checking, and for the Wii port this job is the only something there is.
+  wii:
+    name: wii simulation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: make test
+        working-directory: wii
+        run: make test
+
+      # The simulation must stay free of the engine, or the job above stops
+      # being able to link it -- the same property the web job would assert of
+      # entities.js, and lost the same way: one include reached for in a hurry.
+      - name: The rules stay engine-free
+        run: |
+          if grep -nE '#include[[:space:]]*[<"](grrlib|ogc/|magnolia|gccore)' \
+              wii/source/sim.c wii/source/projection.c; then
+            echo "::error file=wii/source/sim.c::the simulation must not include the engine -- the host suite links it without one"
+            exit 1
+          fi
+          echo "sim.c and projection.c are clean"

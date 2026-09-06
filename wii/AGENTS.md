@@ -1,0 +1,320 @@
+# The Jovian Humanitarian Conflict — Wii port, agent brief
+
+The console version, built on [magnolia](../../../engines/magnolia). `web/` is
+still the source of truth for rules and tuning; this is a port of it, and the
+job of `tests/test_simulation.c` is to keep that true.
+
+Read `../AGENTS.md` first — the no-AI-attribution rule, the fairness invariant
+and the four identification channels apply here unchanged, and this file does
+not repeat them.
+
+## What is finished and what is not
+
+**Finished, and verified here:** the rules. `source/sim.c` is a port of
+`web/js/player.js`, `world.js` and `entities.js` plus the scoring policy out of
+`main.js`, and `tests/test_simulation.c` is the web suite's cases ported case
+for case — 82 checks, run by `make test` with nothing but a C compiler. The
+port was checked by mutation as well as by running; see below.
+
+**Placeholder:** `source/render.c`. It compiles, it builds a `.dol`, and it
+draws the whole game — the banded giant, the streaming deck, contacts, locks,
+countdowns, the ship and the HUD — but out of rectangles, lines and circles.
+The look it has to grow into is `web/js/world.js`, `entities.js` and
+`player.js`. The one part of it that is **not** a placeholder is the
+transponder; see below.
+
+**Absent:** all audio, sprites, the scoreboard, an attract mode. magnolia
+brings scoring up in `magnolia_init()` and none of it is wired.
+
+**Not run anywhere yet:** this has never been on a console or in Dolphin. It
+compiles clean, its rules are tested, and its numbers agree with the browser's
+in distribution. Those are three different claims and none of them is the
+fourth.
+
+## This game ships no audio, and that is a decision the web version made
+
+Every other magnolia game here converts a track. There is nothing to convert:
+
+- The **music** is on the website's jukebox, not in this repo.
+  `CONFIG.MUSIC.URL` in `web/js/config.js` is `../../music/jukebox/songs/…`, a
+  *website* path, because the track is 2.7 MB and lives there in its own right.
+  So `web/` is not standalone from this repo either — opened out of a checkout
+  the game runs silent. Roderick Tron makes the same trade.
+- The **sound effects** are not files at all. `web/js/sfx.js` synthesises all
+  six procedurally in WebAudio, deliberately not through adenosine's `AdAudio`.
+
+So the web game ships exactly one audio asset and it is the one that lives
+somewhere else. Wiring sound here means either fetching the ogg out of the
+website repo and converting it the way makemecookies does, or reimplementing
+six synthesised effects against `ASND` — both real work, neither started.
+
+`jov_run_resolve()` already raises a `JovCue` per frame with a count for each
+of the eight things that make a noise, and `main.c` reads it for shake and
+flash. Wiring audio is a change inside that one block and nowhere else. That is
+why the cues are counts rather than flags: two kills in a frame must not
+silently become one.
+
+## The transponder is the one thing in render.c you may not simplify
+
+`source/config.h` states the blink in the design frame and `render.c` draws it
+at a **constant design size at every depth**, which is what makes a convoy
+identifiable on the frame it spawns. Everything else in that file is a
+placeholder waiting to be replaced; this is load-bearing.
+
+It is also the channel that survives the console best. The web version's four
+channels are ranked so that each is a fallback for the one above, and on a TV
+across a room the lower three all degrade: silhouette loses to overscan and
+composite blur, colour loses to a set nobody has calibrated since 2008, and the
+HUD strip is at the bottom edge where a CRT eats it. Motion does not degrade.
+If a change ever has to cost one of the four channels here, it costs the last
+one, never the first.
+
+## The blink runs on dt here, and on raw frames in the browser
+
+`main.js` increments `frame` once per `requestAnimationFrame` and
+`beaconLit(c, frame)` reads that counter, so on a 144Hz display the browser's
+squawk is 2.4× faster than the 2Hz the constant names. Nobody notices, because
+nothing else is keyed to it.
+
+`jov_beacon_lit()` takes `sim->frame`, which accumulates **dt** rather than
+counting frames, so the squawk is 2Hz in wall-clock on NTSC and on PAL alike.
+That is a deliberate deviation and it is the safer direction: the fairness
+budget is stated in 60fps frames, the rail advances in 60fps frames, and a
+blink that ran on raw frames would be the one quantity in the game that did
+not — 50Hz PAL would fit fewer squawk cycles into the same identification
+window that `TELEGRAPH_MIN_FRAMES` says it must fit two into.
+
+If the browser is ever fixed to match, delete this section rather than the
+behaviour.
+
+## Scoring lives in sim.c, which is not where the browser puts it
+
+`main.js` owns the price list and `entities.js` knows nothing about it. That
+split is right in the browser because `main.js` is reachable from the test vm.
+`main.c` is **not** reachable from `make test` — it includes magnolia — so
+pricing an event there would put friendly-fire attribution outside the suite,
+and friendly-fire attribution is the second most costly thing in this game to
+get wrong.
+
+So `jov_run_resolve()` prices events and emits cues, and `main.c` turns cues
+into shake, flash and (eventually) sound. No policy in `main.c`, no audio in
+`sim.c`. The escort half of that price list is worth singling out: it is paid
+when a convoy leaves the frame alive, which happens when the player did
+*nothing*, so no bot exercises it. "Escort pays nothing" survived the first
+version of this suite.
+
+## The rules must stay engine-free
+
+`source/sim.c` includes `<math.h>` and `<string.h>`; `source/projection.c`
+includes `<math.h>`. No `grrlib.h`, no `ogc/`, no `magnolia.h`. That is what
+lets `make test` link them on any machine with a compiler, and what would let
+CI run them on a GitHub-hosted runner with no devkitPPC anywhere.
+
+Keep it. A `GRRLIB_Rectangle` in `sim.c` costs the entire suite, and the suite
+is the only thing standing between this port and the browser version quietly
+becoming two different games. `TESTDEPS` in the Makefile is the list of files
+that promise this.
+
+The corollary: the input mapping lives in `main.c`. The simulation is handed an
+axis in `[-1, 1]` and never sees a button, which is also why swapping the D-pad
+for the Nunchuk's analog stick later is an engine change and not a change to
+any rule.
+
+## Fixed arrays, and the two counters that watch them
+
+The browser pushes onto arrays that grow. Every array here is a fixed cap, so
+two things can be silently lost, and `sim.h` keeps a counter for each:
+
+- `waves_dropped` — a wave that will not fit is refused **whole**, never
+  half-spawned, because half a wave breaks the separation guarantee that is the
+  only reason the spawner exists.
+- `events_dropped` — an event raised with the queue full. This is the nastier
+  one: the contact still dies, the explosion still plays, and the number at the
+  top of the screen is quietly light.
+
+Both are asserted to stay at zero across 6000 frames of the worst case (firing
+every frame, which maximises kills, explosions and events at once). Measured
+peak contacts in that run is well inside `MAX_CONTACTS`. If either counter ever
+moves, raise the cap — do not raise the tolerance.
+
+## Mutation testing: 14 of 14
+
+Running green proves a suite runs. It does not prove it would notice. Fourteen
+rules were broken in turn and every one was caught:
+
+friendly-fire attribution swapped · `RAIL_SPEED_MAX` raised past the telegraph
+budget · hit-box margins swapped · the nearest-candidate rule dropped · drag
+scaled by dt instead of raised to it · the camera chase likewise · the lock not
+released when the attacker dies · the opening wave left to the dice · the
+separation gap removed · the ping fired every frame · hostiles made to squawk ·
+`MAX_CONTACTS` undersized · escort not paid · i-frames removed.
+
+**Three of those survived the first pass, and the fixes are in the suite now:**
+hostiles squawking (the ping check covers the *sound*, which is a different code
+path from the *light*), escort not paid, and the camera chase — which slipped
+through because the web suite's tolerance of 0.6 is looser than the correct
+implementation needs. A correct `1 - (1 - k)^dt` compounds exactly, so the
+honest tolerance is rounding error; at 0.6 the obvious wrong version lands 0.43
+out and passes. That one is now checked at 0.02, and at two step sizes.
+
+If you add a rule here, break it on purpose before you believe the suite.
+
+## There is no oracle, and what one would cost
+
+`tui/` checks itself against the shipped JavaScript by running it in a node vm
+(`tui/tools/js_oracle.mjs`), so a tuning change to `js/config.js` fails the
+Python suite until it is carried across. Nothing like that exists here, and it
+is not an oversight:
+
+- The RNG **is** shared. `jov_rng_next()` is mulberry32 in 32-bit integer
+  arithmetic, bit-identical to the web suite's generator for a given seed, and
+  it consumes randoms in the same order — including the short-circuit in
+  `spawnWave` that means a convoy must *not* draw an aggro roll.
+- The simulation is not. This runs in `float` where the browser runs in
+  `double`, and libm's `sinf`/`cosf`/`powf` are not V8's `Math.sin`/`cos`/`pow`.
+  Identical seeds give identical **spawns**; they do not give identical
+  trajectories, and asserting they do would produce a suite that fails on a
+  different libm.
+
+An oracle is still buildable and would be worth it: compare the *spawn stream*
+— kinds, lateral positions, the aggro flags — which is pure arithmetic over a
+shared generator and should agree exactly. Trajectories would need a tolerance.
+Nobody has written it.
+
+What exists instead is a distribution check, run by hand on 2026-09-06. Twenty
+seeds flown passively — never firing, never moving — through the real browser
+modules in a vm and through `sim.c` on the host, with `main.js`'s price list
+transcribed for the browser side so the two are scored alike:
+
+|  | browser | this port |
+|---|---|---|
+| run length, median | 52.7 s | 50.6 s |
+| run length, range | 20.3 – 87.9 s | 12.4 – 102.5 s |
+| score, median | 14,000 | 13,000 |
+| convoys escorted, median | 28 | 26 |
+
+Close enough that the difference is two RNG streams rather than two games — and
+worth re-running rather than trusting after any change to the rules. Note the
+first attempt at this used three seeds and appeared to show the port dying
+twice as fast; it was noise, and three samples is not a comparison.
+
+**A passive player scores five figures and ranks well in both.** That is the
+web version's balance, not something the port introduced, and it is the thing
+to look at first if the tuning is ever revisited.
+
+## Dolphin cannot be driven by a script — use `AUTOPILOT`
+
+**Do not spend an afternoon on `SendInput`.** Dolphin's emulated Wiimote reads
+the keyboard through DirectInput, and DirectInput does not observe injected
+keystrokes. Neither `SendInput` nor `keybd_event` reaches the game, from a
+foreground or a background process, and **nothing reports an error** — the keys
+simply do nothing. The mouse is the exception, which is what makes it so
+confusing: `Buttons/A` defaults to `Click 0`, so a script can start a run and
+then find that no direction responds, reading exactly like a broken input
+mapping. Measured on makemecookies; see its `wii/AGENTS.md` for the numbers.
+
+So gameplay is verified with the compile-time hook instead:
+
+```bash
+make CFLAGS='-g -O2 -Wall $(MACHDEP) $(INCLUDE) -DAUTOPILOT=1'
+```
+
+That skips the title, flies a run unattended, shows the results for six seconds
+and then stops driving. Both timeouts matter: without them the results card
+waits for an A press that can never arrive, and `main()` starts a second run
+immediately — which is how a capture ends up showing the *next* run's empty
+scoreboard and getting filed as this one's result. **Returning from `main()`
+does not close Dolphin**, so a scripted run still has to close the emulator
+itself.
+
+`AUTOPILOT_EVERY` sets the reaction time in frames. Verified 2026-09-06:
+`AUTOPILOT` defaults to 0 and compiles away entirely — the default build and an
+explicit `-DAUTOPILOT=0` are byte-identical (`b18a7843…`), the build is
+reproducible across two clean runs, and `-DAUTOPILOT=1` is a different binary,
+as it must be.
+
+**A clean autopilot run does not mean the game is tuned.** The bot reads the
+transponder off the struct, so it never mistakes a convoy for a hostile and can
+tell you nothing about whether a person could — which is the entire question
+this game asks. Flown on the host, the sharp bot (6-frame reaction) scores
+12,000–31,000 over 24–50 seconds and never loses a convoy; a slower one
+(18 frames) scores a third of that. Only hands can say whether the transponder
+is readable, and `../AGENTS.md` says the same about the web version's
+bot-measured tuning.
+
+## printf works, but only since magnolia 0.3.0 — and needs Logger.ini
+
+`printf` reaches Dolphin's log through `SYS_STDIO_Report(true)`, which
+`magnolia_init()` calls. Set `OSREPORT = True` and `WriteToFile = True` in
+Dolphin's `Logger.ini`; both default to False, which makes a working trace look
+like a dead one. Before 0.3.0 the engine did not make that call and every
+`printf` in every game on it was discarded — a 0-byte `dolphin.log` even with
+the Logger.ini half correct.
+
+The lesson that outlives the bug: **a diagnostic nobody receives is worse than
+none**, because it reads in the source as though the case is handled. Use
+`printf` for tracing and the screen for anything a person has to act on.
+
+## Tuning belongs to `web/`, not here
+
+`source/config.h` carries the same numbers as `web/js/config.js` deliberately,
+and the reasoning behind each is copied across with them rather than left
+behind. If a Wiimote turns out to need different numbers — `SHIP_ACCEL` and
+`SHIP_SPEED_MAX` are the two a D-pad is most likely to argue with, since the
+browser's arrow keys are the same digital input but a TV is further away —
+change them **in both files** and say in the commit that they were changed in
+both. Two versions with two balances is two games.
+
+`RAIL_SPEED_MAX` is the one that is not a taste decision. It is bounded by the
+telegraph budget, the suite asserts the relationship, and raising it leaves the
+game fun and quietly unfair.
+
+## Building
+
+Host tests need nothing but a compiler:
+
+```bash
+make test
+```
+
+The console build needs devkitPPC. It **is** installed in WSL on this machine
+at `/opt/devkitpro` (devkitPPC 16.1.0, with GRRLIB in `portlibs/wii`).
+
+```bash
+export DEVKITPRO=/opt/devkitpro
+export DEVKITPPC=/opt/devkitpro/devkitPPC
+export PATH=$DEVKITPPC/bin:$DEVKITPRO/tools/bin:$PATH
+
+make            # build/jovian.dol
+make dolphin    # stage and push to Dolphin's SD folder
+```
+
+Call WSL from PowerShell, not Git Bash — MSYS rewrites `/mnt/c/...` arguments
+before WSL sees them and the call hangs rather than failing.
+
+### Two Makefile traps, both already handled here
+
+**The engine wildcard is evaluated twice.** `MAGNOLIA ?= $(firstword $(wildcard
+../../magnolia ../../../engines/magnolia))` is written against this directory,
+but `make` re-invokes itself with `-C build`, and in that second pass the
+working directory is one level deeper, so both candidates miss and the guard
+fires with the engine sitting exactly where it says it looked. This Makefile
+passes the resolved value down:
+
+```make
+@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile MAGNOLIA=$(MAGNOLIA)
+```
+
+**An absolute `MAGNOLIA=` is not a workaround.** It gets past the guard and then
+fails at `magnolia.h: No such file or directory`, because the devkitPro rules
+build include paths as `$(TOPDIR)/$(dir)`, which only composes with a relative
+one. An override has to be relative to this directory.
+
+**`assets.s` is generated even with no assets.** There are none yet, and
+invoking `bin2s` with no input files errors out, so the rule writes an empty
+blob instead. Delete that branch the moment the first sprite or `.pcm` lands.
+
+## Licence
+
+PolyForm Noncommercial 1.0.0 — see `../LICENSE`, and `../NOTICE` for what is
+reserved outright. magnolia stays Apache-2.0 in its own repository.

@@ -14,11 +14,23 @@ One game, one repo, versions beside each other:
   `tui/tools/js_oracle.mjs`. A tuning change to `js/config.js` therefore fails
   the Python suite until it is carried across, which is the point.
 
-There is no `wii/` and none is planned, which makes this the first game here
-whose README cannot open "the third sibling to web/ and wii/".
+- `wii/` — console version, on [magnolia](../../engines/magnolia). Its rules
+  are a port of `web/js/` and `tests/test_simulation.c` is the web suite's
+  cases ported case for case, run by `make test` with nothing but a C compiler.
+  The renderer is a placeholder, there is no audio at all, and it has never
+  been on a console. See `wii/AGENTS.md`, which is where the console-specific
+  traps live and does not repeat this file.
+
+  This file used to say there was no `wii/` and none was planned. There is one
+  now, and the three-way split is the reason the fairness invariant below is
+  worth its length: it is the only property all three versions have to hold
+  independently, on three renderers with nothing in common.
 
 A rules change is not done until every version that exists has it, or the
-commit says why one is skipped.
+commit says why one is skipped. That is now **three** versions, and the two
+ports check themselves differently: `tui/` runs the real JavaScript as an
+oracle, `wii/` does not and cannot cheaply — see the section of its AGENTS.md
+that says why, and what an oracle there would actually cost.
 
 ## AI Attribution
 

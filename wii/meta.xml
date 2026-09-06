@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<app version="1">
+  <name>The Jovian Humanitarian Conflict</name>
+  <coder>magmacrunch media</coder>
+  <version>0.1.0</version>
+  <release_date>20260906</release_date>
+  <short_description>Know what you are shooting at</short_description>
+  <long_description>An on-rails shooter over the cloud decks of Jupiter. Aid convoys fly among the hostiles and squawk a transponder you must learn to read - shoot one and it costs you the run.
+
+Hold the Wiimote sideways. The D-pad flies, 1 or 2 fires, HOME quits.
+
+Aid convoys squawk a double blink and are worth 500 escorted clear. Hostiles are dark and worth 100 times your combo. A convoy lost to hostiles costs the combo; shooting one yourself costs 1,000 points and one of three strikes. Three strikes ends the run whatever the score says.
+
+Built on magnolia. PolyForm Noncommercial 1.0.0.</long_description>
+</app>
