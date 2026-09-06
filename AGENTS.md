@@ -111,6 +111,35 @@ the player for the thing they did right.
 Until this repo existed those tests ran in no CI anywhere. They do now, on
 every push, in `.github/workflows/ci.yml`.
 
+## Releasing
+
+`tui/` publishes to PyPI as `magmacrunch-jhc` on a `tui-v*` tag. `web/` has no
+release of its own — the website repo syncs it — which is why the tag carries
+the prefix rather than being a bare `v0.1.0`.
+
+**Two things must happen before the first tag, in this order.**
+
+A *pending publisher* has to exist on pypi.org, because the project does not
+exist there yet and Trusted Publishing has nothing to match against: Your
+account → Publishing, owner `magmacrunch-media`, repository
+`jovian-humanitarian-conflict`, workflow `release.yml`, environment blank.
+Skip it and every step passes and the publish alone fails with
+`invalid-publisher`. Nothing is published when that happens, so the version
+stays free and re-running once the publisher exists is enough — but it is a
+confusing ten minutes, and the whole org hit it once already when the rename
+invalidated the other four publishers.
+
+And this releases **before** `magmacrunch` 0.8.0. The arcade lists its cabinets
+as dependencies, so an arcade published before this package exists is an
+unresolvable install for everybody, not only for people who wanted this game.
+
+The workflow runs the web build's own suite first, then the Python one, then
+runs the two oracle suites again on their own and fails if they *skipped*.
+They skip themselves where node is absent, which is right on a laptop and
+wrong at a release: publishing a port whose agreement with the shipped
+JavaScript went unchecked is the one failure this repository is arranged to
+prevent.
+
 ## Licence
 
 PolyForm Noncommercial 1.0.0, matching the other cabinets. The engines it
