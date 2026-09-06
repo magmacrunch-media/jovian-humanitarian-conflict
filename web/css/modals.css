@@ -1,0 +1,190 @@
+/* modals.css — The Jovian Humanitarian Conflict
+   Pause, the after-action report, and credits. */
+
+.overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(5, 6, 15, 0.86);
+    overflow-y: auto;
+}
+
+.panel {
+    width: min(100%, 340px);
+    padding: 22px 20px;
+    text-align: center;
+    background: #0d1230;
+    border: 1px solid rgba(107, 118, 153, 0.5);
+    box-shadow: 0 0 30px rgba(0, 0, 0, 0.8);
+}
+
+.panel-wide {
+    width: min(100%, 460px);
+}
+
+.panel h2 {
+    margin: 0 0 14px;
+    font-size: 15px;
+    letter-spacing: 0.14em;
+    color: var(--aid-pale);
+}
+
+.panel h3 {
+    margin: 18px 0 8px;
+    font-size: 8px;
+    letter-spacing: 0.12em;
+    color: var(--hud-dim);
+}
+
+.end-reason {
+    font-size: 7px;
+    letter-spacing: 0.14em;
+    color: var(--hostile);
+    margin-bottom: 16px;
+}
+
+.final-score {
+    font-size: 24px;
+    color: var(--aid);
+    text-shadow: 0 0 12px rgba(255, 194, 71, 0.5);
+}
+
+.final-rank {
+    margin-top: 8px;
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    color: var(--hud-text);
+}
+
+/* ── After-action report ──
+   The four counts are given equal weight on purpose. A shooter would show the
+   kill count and stop; the whole argument of this one is that the other three
+   numbers are the ones that matter. */
+.stat-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin: 18px 0;
+}
+
+.stat {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 8px 4px;
+    background: rgba(5, 6, 15, 0.6);
+    border: 1px solid rgba(107, 118, 153, 0.25);
+}
+
+.stat-label {
+    font-size: 5px;
+    letter-spacing: 0.1em;
+    color: var(--hud-dim);
+}
+
+.stat-value {
+    font-size: 11px;
+    color: var(--hud-text);
+}
+
+.strike-value {
+    color: var(--hostile);
+}
+
+.initials-prompt {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin: 14px 0;
+    font-size: 7px;
+    color: var(--hud-dim);
+    letter-spacing: 0.1em;
+}
+
+.initials-prompt input {
+    width: 62px;
+    padding: 8px 6px;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 11px;
+    text-align: center;
+    text-transform: uppercase;
+    color: var(--aid);
+    background: #05060f;
+    border: 1px solid rgba(107, 118, 153, 0.6);
+}
+
+.initials-prompt input:focus {
+    outline: none;
+    border-color: var(--aid);
+}
+
+.scores table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 7px;
+    letter-spacing: 0.04em;
+}
+
+.scores th {
+    padding: 5px 4px;
+    color: var(--hud-dim);
+    font-weight: normal;
+    text-align: left;
+    border-bottom: 1px solid rgba(107, 118, 153, 0.3);
+}
+
+.scores td {
+    padding: 5px 4px;
+    color: var(--hud-text);
+    text-align: left;
+}
+
+.scores tr:nth-child(odd) td {
+    background: rgba(5, 6, 15, 0.4);
+}
+
+.end-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin-top: 18px;
+}
+
+/* ── Credits ── */
+.credits-section {
+    margin-bottom: 16px;
+    text-align: left;
+}
+
+.credits-label {
+    font-size: 6px;
+    letter-spacing: 0.12em;
+    color: var(--hud-dim);
+    margin-bottom: 6px;
+}
+
+.credits-value {
+    font-size: 7px;
+    line-height: 2;
+    color: var(--hud-text);
+}
+
+.credits-value a {
+    color: var(--aid);
+}
+
+.credits-value strong {
+    color: var(--aid-pale);
+}
+
+@media (max-width: 480px) {
+    .panel { padding: 16px 12px; }
+    .panel h2 { font-size: 12px; }
+    .final-score { font-size: 18px; }
+    .stat-grid { grid-template-columns: 1fr; }
+}

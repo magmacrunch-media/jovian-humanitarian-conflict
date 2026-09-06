@@ -1,0 +1,34 @@
+# CI for The Jovian Humanitarian Conflict.
+#
+# Until this repository existed the simulation suite ran nowhere automatically:
+# the game lived inside the website repo, whose workflows do not reach into
+# arcade/*/tests/. Sixty-two checks covering the fairness invariant, friendly
+# fire attribution, dt invariance and projection monotonicity were run only by
+# hand, on a game whose whole premise is an arithmetic guarantee.
+#
+# A tui/ job joins this file when tui/ exists.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  web:
+    name: web simulation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # No dependencies and no package.json: the suite loads the shipped
+      # modules into a vm context using only node's standard library, which is
+      # what keeps it honest about testing what ships.
+      - name: The rules, headless
+        working-directory: web/tests
+        run: node test-simulation.js

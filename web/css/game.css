@@ -1,0 +1,100 @@
+/* game.css — The Jovian Humanitarian Conflict
+   The HUD strip that sits over the canvas during a run. */
+
+.hud {
+    position: fixed;
+    /* Clears the shared .mc-back link, which arcade-base.css fixes at top 12px
+       and which is NOT in this element's flow. At top 0 the HUD's leftmost
+       column sat straight under "magmacrunch arcade" on any viewport below
+       about 570px, because the row is centred and closes on the left edge as
+       it narrows. Roderick Tron reserves the same strip for the same reason. */
+    top: 30px;
+    left: 0;
+    right: 0;
+    z-index: 40;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    gap: clamp(10px, 3vw, 34px);
+    padding: 8px 14px;
+    pointer-events: none;
+    background: linear-gradient(to bottom,
+        rgba(5, 6, 15, 0.82) 0%,
+        rgba(5, 6, 15, 0) 100%);
+}
+
+/* The three groups are laid out by the flex row above rather than pinned to
+   the edges: at 480px wide, pinned corners leave the middle values stranded
+   under the in-canvas contact strip. */
+.hud-left,
+.hud-mid,
+.hud-right {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    min-width: 46px;
+}
+
+.hud-label {
+    font-size: 6px;
+    letter-spacing: 0.1em;
+    color: var(--hud-dim);
+}
+
+.hud-value {
+    font-size: 9px;
+    letter-spacing: 0.06em;
+    color: var(--hud-text);
+    white-space: nowrap;
+}
+
+.life {
+    color: var(--glass);
+    margin: 0 1px;
+}
+
+.life.spent {
+    color: rgba(107, 118, 153, 0.35);
+}
+
+/* Strikes are the losing condition the score does not show, so they are drawn
+   in the hostile colour and lit rather than dimmed — an unlit box is good news
+   and should not read as the active state. */
+.strike {
+    color: rgba(107, 118, 153, 0.35);
+    margin: 0 1px;
+}
+
+.strike.lit {
+    color: var(--hostile);
+    text-shadow: 0 0 6px rgba(255, 47, 168, 0.7);
+}
+
+.hud-btn {
+    pointer-events: auto;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 9px;
+    color: var(--hud-text);
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    letter-spacing: 0.06em;
+}
+
+.hud-btn:hover,
+.hud-btn:focus-visible {
+    color: var(--aid);
+    outline: none;
+}
+
+@media (max-width: 560px) {
+    .hud {
+        gap: 10px;
+        padding: 6px 8px;
+    }
+
+    .hud-label { font-size: 5px; }
+    .hud-value { font-size: 8px; }
+}

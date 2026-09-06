@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>THE JOVIAN HUMANITARIAN CONFLICT — magmacrunch media</title>
+    <meta name="description" content="An on-rails shooter over the cloud decks of Jupiter. Aid convoys fly among the hostiles and squawk a transponder. Shoot one and it costs you the run. Built around Jimmi's The Jovian Humanitarian Conflict.">
+    <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../shared/arcade-base.css?v=de5e0d7b">
+    <link rel="stylesheet" href="css/base.css?v=bb1db2a1">
+    <link rel="stylesheet" href="css/start-screen.css?v=7638b61e">
+    <link rel="stylesheet" href="css/game.css?v=35669234">
+    <link rel="stylesheet" href="css/modals.css?v=36378eb3">
+</head>
+<body>
+<a href="../action/" class="mc-back">action games</a>
+
+<!-- Title -->
+<div id="titleScreen" class="title-screen">
+    <h1>THE JOVIAN<br>HUMANITARIAN<br>CONFLICT</h1>
+    <p class="subtitle">know what you are shooting at</p>
+    <div class="controls-hint">
+        ARROWS / WASD: fly<br>
+        Z / SPACE: fire<br>
+        M: sound &middot; P: pause
+    </div>
+    <div class="iff-key">
+        <div class="iff-row">
+            <span class="iff-mark aid">&#10010;</span>
+            <span class="iff-text">AID CONVOY: squawks a double blink. Escort it through.</span>
+        </div>
+        <div class="iff-row">
+            <span class="iff-mark hostile">&#9650;</span>
+            <span class="iff-text">HOSTILE: dark transponder. Destroy it.</span>
+        </div>
+        <div class="iff-row">
+            <span class="iff-mark warn">&#9888;</span>
+            <span class="iff-text">Hostiles hunt the convoys. A marked convoy is
+            linked to its attacker and has a timer. Kill that hostile to save it.</span>
+        </div>
+    </div>
+    <div class="start-prompt">PRESS SPACE</div>
+    <button id="btnStart" class="touch-start">START</button>
+    <p class="copyright">&copy; 2026 MAGMACRUNCH MEDIA</p>
+</div>
+
+<!-- Canvas -->
+<div id="gameContainer" class="game-container">
+    <canvas id="gameCanvas" width="480" height="270"></canvas>
+</div>
+
+<!-- HUD -->
+<div id="hud" class="hud hidden">
+    <div class="hud-left">
+        <div class="hud-label">SCORE</div>
+        <div class="hud-value" id="scoreDisplay">0</div>
+    </div>
+    <div class="hud-mid">
+        <div class="hud-label">ESCORTED</div>
+        <div class="hud-value" id="escortDisplay">0</div>
+    </div>
+    <div class="hud-mid">
+        <div class="hud-label">COMBO</div>
+        <div class="hud-value" id="comboDisplay">x1</div>
+    </div>
+    <div class="hud-right">
+        <div class="hud-label">SHIPS</div>
+        <div class="hud-value" id="livesDisplay"></div>
+    </div>
+    <div class="hud-right">
+        <div class="hud-label">STRIKES</div>
+        <div class="hud-value" id="strikeDisplay"></div>
+    </div>
+    <div class="hud-right">
+        <div class="hud-label">SOUND</div>
+        <div class="hud-value"><button id="btnMute" class="hud-btn"><span id="musicState">ON</span></button></div>
+    </div>
+</div>
+
+<!-- Pause -->
+<div id="pauseOverlay" class="overlay hidden">
+    <div class="panel">
+        <h2>PAUSED</h2>
+        <button id="btnResume" class="btn">RESUME</button>
+    </div>
+</div>
+
+<!-- Game over -->
+<div id="gameOverOverlay" class="overlay hidden">
+    <div class="panel panel-wide">
+        <h2>FIN</h2>
+        <div class="end-reason" id="endReason">SHIP LOST</div>
+
+        <div class="final-score" id="finalScore">0</div>
+        <div class="final-rank" id="finalRank">UNTESTED</div>
+
+        <div class="stat-grid">
+            <div class="stat"><span class="stat-label">HOSTILES</span><span class="stat-value" id="statKills">0</span></div>
+            <div class="stat"><span class="stat-label">ESCORTED</span><span class="stat-value" id="statEscorted">0</span></div>
+            <div class="stat"><span class="stat-label">LOST</span><span class="stat-value" id="statLost">0</span></div>
+            <div class="stat"><span class="stat-label">FRIENDLY FIRE</span><span class="stat-value strike-value" id="statStrikes">0</span></div>
+        </div>
+
+        <div id="initialsPrompt" class="initials-prompt">
+            <label for="initialsInput">INITIALS</label>
+            <input id="initialsInput" type="text" maxlength="3" autocomplete="off" spellcheck="false">
+            <button id="btnSubmit" class="btn">OK</button>
+        </div>
+
+        <div class="scores">
+            <h3>RECORDS</h3>
+            <table>
+                <thead>
+                <tr><th>#</th><th>WHO</th><th>SCORE</th><th>SAVED</th></tr>
+                </thead>
+                <tbody id="scoresBody"></tbody>
+            </table>
+        </div>
+
+        <div class="end-actions">
+            <button id="btnRestart" class="btn">FLY AGAIN</button>
+            <button id="btnCredits" class="btn btn-quiet">CREDITS</button>
+        </div>
+    </div>
+</div>
+
+<!-- Credits -->
+<div id="creditsOverlay" class="overlay hidden">
+    <div class="panel panel-wide">
+        <h2>CREDITS</h2>
+        <div class="credits-section">
+            <div class="credits-label">MUSIC</div>
+            <div class="credits-value">
+                <strong>&ldquo;The Jovian Humanitarian Conflict&rdquo;</strong> by Jimmi, from
+                the album <em>JIMMI</em>. The game takes its name and its subject
+                from the track.
+            </div>
+        </div>
+        <div class="credits-section">
+            <div class="credits-label">HOW TO PLAY</div>
+            <div class="credits-value">
+                Fly with the arrows or WASD. Fire with Z or Space. Contacts come
+                at you out of the vanishing point. <strong>Aid convoys squawk a
+                double blink</strong> and carry a cross. Hostiles run dark and
+                angular. The strip along the top shows every contact, including
+                the ones you cannot pick out of the sky.
+                <br><br>
+                <strong>Saving a convoy means killing the hostile hunting it.</strong>
+                When one is marked, a line joins it to its attacker, a ring
+                marks that hostile, and a bar under the convoy shows how long
+                you have. Shoot the ringed hostile before the bar empties.
+            </div>
+        </div>
+        <div class="credits-section">
+            <div class="credits-label">SCORING</div>
+            <div class="credits-value">
+                Hostile destroyed +100 &times; combo. Convoy escorted clear +500.
+                A convoy lost to hostiles costs you the combo. Shooting one
+                yourself costs 1,000 and one of three strikes.
+                <strong>Three ends the run</strong>, whatever the score says.
+            </div>
+        </div>
+        <div class="credits-section">
+            <div class="credits-label">BUILT WITH</div>
+            <div class="credits-value">
+                Vanilla HTML, CSS &amp; JavaScript &middot; Canvas API &middot;
+                <a href="https://github.com/magmacrunch-media/adenosine">adenosine</a>
+                &middot; Press Start 2P
+            </div>
+        </div>
+        <button id="btnCloseCredits" class="btn">CLOSE</button>
+    </div>
+</div>
+
+<div class="scanlines"></div>
+
+<script src="../shared/adenosine-audio.js?v=d96fbb5f"></script>
+<script src="../shared/adenosine-score-client.js?v=55cabd6d"></script>
+<script src="../shared/score-server.js?v=9acd988c"></script>
+<script>const scoreClient = new AdScore.ScoreClient().auto(MC_SCORE_OPTS);</script>
+<script src="js/config.js?v=95746cd7"></script>
+<script src="js/projection.js?v=400ee542"></script>
+<script src="js/sfx.js?v=8028467e"></script>
+<script src="js/input.js?v=89c8e853"></script>
+<script src="js/renderer.js?v=9beed804"></script>
+<script src="js/player.js?v=d773195e"></script>
+<script src="js/world.js?v=45cc4482"></script>
+<script src="js/entities.js?v=9189b890"></script>
+<script src="js/main.js?v=6835cc79"></script>
+
+<link rel="stylesheet" href="../shared/chat-widget.css?v=21d22238">
+<script src="../shared/adenosine-chat.js?v=4a6b886b"></script>
+<script src="../shared/chat-server.js?v=2efa8028"></script>
+<script>const { ChatWidget } = AdChat;</script>
+<script>ChatWidget.connect(MC_CHAT_OPTS);</script>
+</body>
+</html>

@@ -1,0 +1,93 @@
+/* base.css — The Jovian Humanitarian Conflict
+   Page shell, palette custom properties, the canvas frame. */
+
+:root {
+    /* The shared back-link and scanline overlay read these. */
+    --mc-back-color: #ffc247;
+    --mc-back-glow: 0 0 8px #ffc247;
+    --mc-scanline-opacity: 0.13;
+
+    --void: #05060f;
+    --void-haze: #0d1230;
+    --aid: #ffc247;
+    --aid-pale: #fff2cf;
+    --hostile: #ff2fa8;
+    --hud-text: #e8eeff;
+    --hud-dim: #6b7699;
+    --glass: #5ff0ff;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: var(--void);
+    color: var(--hud-text);
+    font-family: 'Press Start 2P', monospace;
+    overflow: hidden;
+    /* The whole game is steering; a stray text selection drag during play is
+       nothing but a way to lose a ship. */
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.hidden {
+    display: none !important;
+}
+
+.game-container {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+canvas {
+    /* The rail is a stream of hard-edged pixels toward the camera; smoothing
+       it turns the deck bands into a grey wash. */
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    display: block;
+    background: var(--void);
+    /* Sized in JS by Renderer.fit() so one game pixel covers a whole number of
+       screen pixels wherever there is room for it. */
+    touch-action: none;
+}
+
+.btn {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    color: var(--void);
+    background: var(--aid);
+    border: none;
+    padding: 10px 16px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.btn:hover,
+.btn:focus-visible {
+    background: var(--aid-pale);
+    outline: none;
+}
+
+.btn-quiet {
+    background: transparent;
+    color: var(--hud-dim);
+    border: 1px solid var(--hud-dim);
+}
+
+.btn-quiet:hover,
+.btn-quiet:focus-visible {
+    background: transparent;
+    color: var(--hud-text);
+    border-color: var(--hud-text);
+}
