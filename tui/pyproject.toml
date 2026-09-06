@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+# Prefixed for the same reason as magmacrunch-thld and magmacrunch-george-boole:
+# PyPI has no scoping like the npm @magmacrunch/… packages, so the distribution
+# is namespaced. Abbreviated for the same reason as thld — the full title makes
+# an unwieldy package name — while the import package stays plain `jovian`,
+# because that is what you type in code and it competes for nothing.
+name = "magmacrunch-jhc"
+version = "0.1.0"
+description = "The Jovian Humanitarian Conflict — terminal version"
+readme = "README.md"
+license = "PolyForm-Noncommercial-1.0.0"
+requires-python = ">=3.10"
+authors = [{ name = "magmacrunch media" }]
+
+# The engine, with its terminal backend.
+#
+# 0.7.1 rather than 0.7.0: 0.7.0 shipped the glyph fallback with the launcher's
+# own box-drawing characters missing from the table, which is what this game's
+# HUD frame is drawn out of. Pinned a release too low the install succeeds and
+# the frame is mojibake on exactly the terminal the fallback exists for.
+#
+# The rules do not need any of it: jovian/config.py and jovian/projection.py
+# import nothing outside the standard library, and tests/test_physics.py runs
+# with nothing but pytest on the machine, which is what proves it.
+dependencies = ["magmacrunch>=0.7.1"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "ruff>=0.6"]
+
+# The command and the arcade entry point land with the screens, in phase 04.
+# They are commented rather than written ahead of the modules they name because
+# an entry point is metadata that nothing validates at install time: declared
+# now, the package installs cleanly and then `magmacrunch --list` reports a
+# cabinet that cannot be loaded. The launcher would survive it — saying what it
+# found and why anything was skipped is what that flag is for — but a game that
+# advertises itself and then fails to start is a worse first impression than
+# one that is simply not there yet.
+#
+# [project.scripts]
+# jovian = "jovian.__main__:main"
+#
+# [project.entry-points."magmacrunch.games"]
+# jovian = "jovian.arcade:GAME"
+
+[tool.hatch.build.targets.wheel]
+packages = ["jovian"]
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ARG"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

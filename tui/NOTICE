@@ -1,0 +1,50 @@
+The Jovian Humanitarian Conflict
+Copyright 2026 magmacrunch media
+
+
+THE LICENCE
+
+Everything in this repository -- the browser version in web/, the tests, the
+build files and the documentation -- is licensed under the PolyForm
+Noncommercial License 1.0.0, in the LICENSE file beside this one.
+
+Read it, learn from it, build on it, play with it. Any noncommercial purpose is
+permitted, and that includes personal projects, teaching and research. What is
+not permitted is commercial use: selling the game or a derivative of it,
+shipping it inside a product, or running it as part of a business.
+
+
+WHAT IS RESERVED OUTRIGHT
+
+The game ships no art: the gas giant, its bands, the cloud deck, the ship and
+every contact are drawn procedurally onto a canvas rather than loaded from
+files. The sound effects are synthesised at runtime by web/js/sfx.js and are
+not assets either. So there is very little here to reserve that is not code.
+
+What is reserved: the game's name, the magmacrunch name and marks, the Jovian
+palette and visual design, the transponder and identification design, and the
+music.
+
+The music is "The Jovian Humanitarian Conflict" by Jimmi, a magmacrunch media
+record label act -- the game is named after the song, not the other way round.
+The track is not in this repository. It is served from the website's jukebox,
+and web/js/config.js points at it there rather than carrying a second copy.
+Copyright 2026 magmacrunch media, all rights reserved.
+
+Those are Copyright 2026 magmacrunch media, all rights reserved. The licence
+covers the software, and it grants no trademark rights.
+
+If you want to use any of it, ask.
+
+
+THIRD-PARTY COMPONENTS
+
+Press Start 2P, by CodeMan38, licensed under the SIL Open Font License 1.1.
+Loaded from Google Fonts by web/index.html rather than shipped here.
+
+adenosine, the browser engine whose AdAudio module plays the music and whose
+score and chat clients the deployed page loads, is Copyright 2026 magmacrunch
+media under the Apache License 2.0. It is a separate repository and keeps that
+licence -- the engine is meant to be reused; this game is not. Note the game's
+own modules depend on none of it: web/js/ is vanilla JavaScript over the Canvas
+API, and the shared bundles are wired in by the website at deploy time.
