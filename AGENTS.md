@@ -7,8 +7,12 @@ One game, one repo, versions beside each other:
   `js/config.js`. Deployed by the website repo, which copies `web/` into
   `arcade/jovian-humanitarian-conflict/`. Never edit the website's copy
   directly — it gets overwritten.
-- `tui/` — terminal version, planned. Will run on the `magmacrunch.engine` TUI
-  engine and publish as `magmacrunch-jhc`.
+- `tui/` — terminal version, on the `magmacrunch.engine` TUI engine.
+  `python -m jovian`, and a cabinet in the arcade. Publishes as
+  `magmacrunch-jhc`. Its rules are a transcription of `web/js/` and are checked
+  against it by running the real JavaScript in a node vm — see
+  `tui/tools/js_oracle.mjs`. A tuning change to `js/config.js` therefore fails
+  the Python suite until it is carried across, which is the point.
 
 There is no `wii/` and none is planned, which makes this the first game here
 whose README cannot open "the third sibling to web/ and wii/".
