@@ -12,11 +12,13 @@ written yet, so there is nothing to play here today. What exists:
 | `jovian/projection.py` | The pseudo-3D transform, pure |
 | `jovian/player.py` | The ship: flight, banking, guns, invincibility |
 | `jovian/entities.py` | Contacts, shots, particles — and the IFF rules |
+| `jovian/world.py` | The rail: camera drift, the cloud deck, stars |
 | `tests/test_physics.py` | The rules, with no engine on the machine |
 | `tests/test_oracle.py` | Constants and transform, against the shipped JS |
 | `tests/test_simulation_oracle.py` | Two whole runs, frame by frame, against the shipped JS |
 
-Still to come: `world.py` (the cloud deck), the screens, and the cell mapping.
+The simulation is complete. Still to come: the screens, and the cell
+mapping that turns the 480x270 canvas into character rows.
 
 ## Why a terminal port is possible at all
 

@@ -32,8 +32,17 @@ import vm from 'node:vm';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const JS = resolve(HERE, '..', '..', 'web', 'js');
 
-const context = vm.createContext({ Math, console });
-for (const file of ['config.js', 'projection.js', 'player.js', 'entities.js']) {
+// World.reset() calls Math.random() directly rather than taking an injected
+// one -- a browser has no seeded run to protect -- so the context gets a Math
+// whose random is swappable. Object.create keeps every other member (PI, cos,
+// imul) resolving through the prototype, so only the one function is replaced
+// and the host's own Math is left alone.
+let randomHook = Math.random;
+const scriptedMath = Object.create(Math);
+scriptedMath.random = () => randomHook();
+
+const context = vm.createContext({ Math: scriptedMath, console });
+for (const file of ['config.js', 'projection.js', 'player.js', 'entities.js', 'world.js']) {
     vm.runInContext(readFileSync(join(JS, file), 'utf8'), context, { filename: file });
 }
 
@@ -48,6 +57,7 @@ const Difficulty = vm.runInContext('Difficulty', context);
 const Project = vm.runInContext('Project', context);
 const newPlayer = () => vm.runInContext('new Player()', context);
 const newEntities = () => vm.runInContext('new Entities()', context);
+const newWorld = () => vm.runInContext('new World()', context);
 
 // A seeded PRNG, not a formula.
 //
@@ -293,6 +303,37 @@ for (const killAttacker of [false, true]) {
         ]);
     }
     out.lock.push([killAttacker, frames]);
+}
+
+// ── The rail ─────────────────────────────────────────────────────────
+{
+    randomHook = scripted();
+    const w = newWorld();
+    randomHook = Math.random;   // put it back; nothing else should be scripted
+
+    out.world = {
+        bands: w.bands.slice(),
+        stars: w.stars.map((s) => [s.x, s.y, s.b]),
+        runs: [],
+    };
+
+    // The camera chase raised to dt, which is the same shape of bug as the
+    // ship's drag: a straight multiply overshoots at low frame rates and the
+    // horizon wobbles. Three timesteps, so a port that writes `* dt` fails.
+    for (const dt of [1, 0.5, 2]) {
+        randomHook = scripted();
+        const world = newWorld();
+        randomHook = Math.random;
+        const p = newPlayer();
+        const frames = [];
+        for (let f = 0; f < 300; f++) {
+            const t = Difficulty.at(world.distance);
+            p.update(Math.sin(f / 30), Math.cos(f / 45), false, dt);
+            world.update(p, Difficulty.railSpeed(t), dt);
+            frames.push([world.distance, world.camX, world.camY, world.bands.slice()]);
+        }
+        out.world.runs.push([dt, frames]);
+    }
 }
 
 process.stdout.write(JSON.stringify(out));

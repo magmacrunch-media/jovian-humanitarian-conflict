@@ -24,6 +24,7 @@ import pytest
 from jovian import config
 from jovian.entities import Contact, Entities
 from jovian.player import Player
+from jovian.world import World
 
 ORACLE = pathlib.Path(__file__).resolve().parent.parent / "tools" / "js_oracle.mjs"
 REL = 1e-9
@@ -247,6 +248,51 @@ def test_the_lock_and_the_rescue_agree(js):
                 assert mine[2:] == pytest.approx(theirs[2:], rel=REL)
             assert [[ev.type, ev.contact.id] for ev in e.drain_events()] == \
                 [list(x) for x in want[2]], f"kill={kill_attacker} f={f}: events"
+
+
+# ── The rail ────────────────────────────────────────────────────────
+
+
+def test_the_rail_is_built_the_same_way(js):
+    """Bands and stars, straight after reset.
+
+    The bands are deterministic and the stars are not, so this is also what
+    checks the star draws happen in the same order — x, y, brightness — which a
+    port can silently get wrong and only notice as a differently-shaped sky.
+    """
+    w = World()
+    w.reset(scripted(js["randoms"]))
+
+    assert w.bands == pytest.approx(js["world"]["bands"], rel=REL)
+    assert len(w.stars) == len(js["world"]["stars"])
+    for i, (mine, theirs) in enumerate(
+        zip(w.stars, js["world"]["stars"], strict=True)
+    ):
+        got = [mine.x, mine.y, mine.brightness]
+        assert got == pytest.approx(theirs, rel=REL), f"star {i}"
+
+
+def test_the_camera_chases_the_same_way(js):
+    """Three hundred frames at three timesteps.
+
+    The chase is proportional, so it is raised to dt rather than multiplied by
+    it — the same shape of bug as the ship's drag, and invisible at 60Hz. The
+    bands are compared too, because their wrap is a `while` loop that a large
+    dt is meant to survive without the spacing collapsing into a clump.
+    """
+    for dt, want_frames in js["world"]["runs"]:
+        w, p = World(), Player()
+        w.reset(scripted(js["randoms"]))
+        for f, want in enumerate(want_frames):
+            t = config.difficulty_at(w.distance)
+            p.update(math.sin(f / 30), math.cos(f / 45), False, dt)
+            w.update(p, config.rail_speed(t), dt)
+
+            where = f"dt={dt} f={f}"
+            assert w.distance == pytest.approx(want[0], rel=REL), f"{where}: distance"
+            assert w.cam_x == pytest.approx(want[1], rel=REL), f"{where}: camX"
+            assert w.cam_y == pytest.approx(want[2], rel=REL), f"{where}: camY"
+            assert w.bands == pytest.approx(want[3], rel=REL), f"{where}: bands"
 
 
 def test_the_oracle_actually_exercised_the_cruel_paths(js):

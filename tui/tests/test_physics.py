@@ -11,9 +11,13 @@ purpose: two implementations of one game that disagree about the fairness
 budget is worse than either one being wrong alone.
 """
 
+from itertools import pairwise
+
 import pytest
 
 from jovian import config, projection
+from jovian.player import Player
+from jovian.world import BAND_COUNT, World
 
 # ── The fairness invariant ──────────────────────────────────────────
 #
@@ -223,6 +227,86 @@ def test_a_convoy_can_be_saved_after_it_is_locked():
     assert config.AID_KILL_FRAMES >= 114
 
 
+# ── The rail ────────────────────────────────────────────────────────
+
+
+def _rail():
+    """A world built from a fixed sequence, so a failure is reproducible."""
+    seq = iter([(i * 0.6180339887) % 1.0 for i in range(1, 5000)])
+    w = World()
+    w.reset(lambda: next(seq))
+    return w
+
+
+def test_the_deck_bands_are_evenly_spaced():
+    w = _rail()
+    assert len(w.bands) == BAND_COUNT
+    gaps = [b - a for a, b in pairwise(w.bands)]
+    assert gaps == pytest.approx([config.DECK_Z_SPAN / BAND_COUNT] * len(gaps))
+
+
+def test_the_bands_keep_their_spacing_across_a_large_step():
+    """The wrap adds the span rather than assigning it, so an enormous dt
+    cannot collapse the ring into a clump at zero — which is what an assignment
+    would do, and which reads on screen as the deck stopping dead."""
+    w = _rail()
+    p = Player()
+    for _ in range(40):
+        w.update(p, config.RAIL_SPEED_MAX, 30)
+
+    ordered = sorted(w.bands)
+    gaps = [b - a for a, b in pairwise(ordered)]
+    assert gaps == pytest.approx([config.DECK_Z_SPAN / BAND_COUNT] * len(gaps))
+    assert all(0 < b <= config.DECK_Z_SPAN for b in w.bands)
+
+
+def test_the_camera_closes_on_the_ship_but_never_overshoots():
+    """A proportional chase. Overshoot would be visible as the horizon
+    wobbling past the ship and settling back."""
+    w = _rail()
+    p = Player()
+    p.x, p.y = 120.0, 60.0
+
+    previous = -1.0
+    for _ in range(200):
+        w.update(p, 0, 1)
+        assert w.cam_x > previous, "the camera should be closing, monotonically"
+        assert w.cam_x <= p.x, "and never past the ship"
+        previous = w.cam_x
+    assert w.cam_x == pytest.approx(p.x, abs=0.5)
+
+
+def test_the_camera_follows_only_half_the_vertical():
+    """Climbing lifts the horizon less than it lifts the ship, which is what
+    keeps the ship readable against the deck instead of pinned to it."""
+    w = _rail()
+    p = Player()
+    p.x, p.y = 0.0, 80.0
+    for _ in range(400):
+        w.update(p, 0, 1)
+    assert w.cam_y == pytest.approx(p.y * 0.5, abs=0.5)
+
+
+def test_stars_are_fixed_to_the_backdrop():
+    """They read as infinitely far away, so nothing about the rail moves them."""
+    w = _rail()
+    before = [(s.x, s.y, s.brightness) for s in w.stars]
+    p = Player()
+    for _ in range(300):
+        w.update(p, config.RAIL_SPEED_MAX, 1)
+    assert [(s.x, s.y, s.brightness) for s in w.stars] == before
+
+
+def test_the_rail_needs_no_randomness_of_its_own():
+    """reset takes its randomness as an argument, so a seeded run is
+    reproducible and a test never depends on global state."""
+    a, b = World(), World()
+    seq = [(i * 0.31) % 1.0 for i in range(500)]
+    a.reset(iter(seq).__next__)
+    b.reset(iter(seq).__next__)
+    assert [(s.x, s.y) for s in a.stars] == [(s.x, s.y) for s in b.stars]
+
+
 # ── The seam ────────────────────────────────────────────────────────
 
 
@@ -236,7 +320,8 @@ def test_the_rules_need_no_engine():
     import sys
 
     code = (
-        "import sys, jovian.config, jovian.projection; "
+        "import sys, jovian.config, jovian.projection, "
+        "jovian.player, jovian.entities, jovian.world; "
         "print([m for m in sys.modules "
         "if m.startswith('magmacrunch') or m == 'textual' or m == 'rich'])"
     )
