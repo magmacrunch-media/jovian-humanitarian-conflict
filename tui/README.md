@@ -3,22 +3,40 @@
 The second version, alongside `web/` (browser). Runs on the
 [magmacrunch.engine](https://pypi.org/project/magmacrunch/) terminal backend.
 
-**Work in progress.** The rules are ported and tested; the screens are not
-written yet, so there is nothing to play here today. What exists:
+```
+python -m jovian
+```
+
+Arrows or WASD to fly, `Z` or `Space` to fire, `P` to pause, `R` to restart.
+It is also a cabinet in the [magmacrunch](https://pypi.org/project/magmacrunch/)
+arcade and plays identically either way.
 
 | | |
 |---|---|
 | `jovian/config.py` | Every constant, transcribed from `web/js/config.js` |
 | `jovian/projection.py` | The pseudo-3D transform, pure |
+| `jovian/cells.py` | That canvas onto character cells |
 | `jovian/player.py` | The ship: flight, banking, guns, invincibility |
 | `jovian/entities.py` | Contacts, shots, particles — and the IFF rules |
 | `jovian/world.py` | The rail: camera drift, the cloud deck, stars |
-| `tests/test_physics.py` | The rules, with no engine on the machine |
-| `tests/test_oracle.py` | Constants and transform, against the shipped JS |
-| `tests/test_simulation_oracle.py` | Two whole runs, frame by frame, against the shipped JS |
+| `jovian/scenes.py` | The screens |
+| `tests/` | The rules with no engine, the port against the shipped JS, the screens, the plain-terminal render |
 
-The simulation is complete. Still to come: the screens, and the cell
-mapping that turns the 480x270 canvas into character rows.
+## Two verbs, on opposite sides of one seam
+
+A terminal never reports a key release and goes silent for its repeat delay, so
+the engine offers two input semantics and this is the first cabinet that needs
+both at once.
+
+**Steering** is a held direction feeding an accelerate-and-coast model, where
+overshoot is survivable and the stakes are only which way the ship drifts. That
+is what decay is for, so this is the first cabinet to ask for `hold_ms` above
+zero — 180ms.
+
+**Firing** is the opposite. The whole game is that refusing to shoot is a
+decision, so the moment of pressing *is* the game; it is read as a discrete
+press and never from held state. Auto-fire would delete the game rather than
+simplify it.
 
 ## Why a terminal port is possible at all
 

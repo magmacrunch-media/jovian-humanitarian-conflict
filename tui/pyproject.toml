@@ -31,20 +31,17 @@ dependencies = ["magmacrunch>=0.7.1"]
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "ruff>=0.6"]
 
-# The command and the arcade entry point land with the screens, in phase 04.
-# They are commented rather than written ahead of the modules they name because
-# an entry point is metadata that nothing validates at install time: declared
-# now, the package installs cleanly and then `magmacrunch --list` reports a
-# cabinet that cannot be loaded. The launcher would survive it — saying what it
-# found and why anything was skipped is what that flag is for — but a game that
-# advertises itself and then fails to start is a worse first impression than
-# one that is simply not there yet.
-#
-# [project.scripts]
-# jovian = "jovian.__main__:main"
-#
-# [project.entry-points."magmacrunch.games"]
-# jovian = "jovian.arcade:GAME"
+[project.scripts]
+jovian = "jovian.__main__:main"
+
+# Found by a launcher enumerating installed games. Declaring it costs nothing
+# when the game is run on its own, and is the whole of what makes it appear in
+# an arcade menu — see magmacrunch.engine.arcade. It was commented out until
+# the screens existed, because an entry point is metadata nothing validates at
+# install time: declared early, the package installs cleanly and then
+# `magmacrunch --list` reports a cabinet that cannot be loaded.
+[project.entry-points."magmacrunch.games"]
+jovian = "jovian.arcade:GAME"
 
 [tool.hatch.build.targets.wheel]
 packages = ["jovian"]
