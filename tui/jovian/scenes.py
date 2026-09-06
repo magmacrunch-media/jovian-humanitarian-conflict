@@ -49,6 +49,39 @@ RULES_HELP = "↑↓ scroll    any other key goes back"
 INITIALS_HELP = "Enter confirms    Backspace fixes"
 SCORES_HELP = "any key goes back"
 
+#: What the ported constants are measured in.
+#:
+#: **The one unit conversion in the game, and it belongs at exactly one line.**
+#: Every rate in :mod:`jovian.config` is "units per 60fps frame" and is
+#: multiplied by dt at the point of use — the web build's convention, and what
+#: makes the simulation frame-rate independent and comparable against the
+#: shipped JavaScript. The engine's loop measures dt in *seconds*
+#: (``now - self._last_time``), so handing it straight to the simulation runs
+#: the game about sixty times too slow: the ship crawls, the rail barely moves,
+#: and nothing looks broken enough to be obviously wrong.
+#:
+#: Moonlight Drift never met this because it is frame-locked — its update takes
+#: no dt at all and steps once per call. This game inherits real dt scaling
+#: from the browser, so it has to say what a dt of one means.
+FRAMES_PER_SECOND = 60.0
+
+#: The deck's surface, in world units, and how wide a band is drawn.
+#:
+#: Locals in ``world.js``'s drawDeck, promoted here because a terminal draws
+#: the same two numbers in two places — the bands and the rails — and they have
+#: to agree or the rails leave the deck. DECK_Y sits below the ship's box
+#: rather than on it, so the deck reads as ground the rail runs over.
+DECK_Y = 150
+DECK_HALF_W = 900
+
+#: Rows a drawn band must clear before another is drawn. Two leaves a gap
+#: between every pair, which is what the motion reads against.
+DECK_ROW_GAP = 2
+
+#: Where the converging rails meet the bottom of the frame.
+RAIL_NEAR_X = 210
+RAIL_NEAR_Z = 20
+
 #: Keys that fire. Read as *key names* in handle_key rather than as the
 #: engine's button "a", because firing must be an edge and the input source is
 #: running with decay for the sake of steering.
@@ -462,14 +495,17 @@ class GameScene:
         t = config.difficulty_at(self.world.distance)
         rail = config.rail_speed(t)
 
+        # Seconds in, 60fps frames out. See FRAMES_PER_SECOND.
+        frames = dt * FRAMES_PER_SECOND
+
         # Firing is not read here. It is an edge, and arrives in handle_key.
-        self.player.update(float(axis_x), float(axis_y), False, dt)
-        self.world.update(self.player, rail, dt)
-        self.entities.update(self.player, rail, t, dt, self.app.rng.random)
+        self.player.update(float(axis_x), float(axis_y), False, frames)
+        self.world.update(self.player, rail, frames)
+        self.entities.update(self.player, rail, t, frames, self.app.rng.random)
         self._score_events()
 
         if self.combo_timer > 0:
-            self.combo_timer -= dt
+            self.combo_timer -= frames
             if self.combo_timer <= 0:
                 self.combo = 1
 
@@ -562,25 +598,97 @@ class GameScene:
                 r.ui_text(at[0], at[1], theme.STAR_GLYPH, fill=theme.STAR)
 
     def _draw_deck(self, r, grid, top, rows) -> None:
-        """The cloud deck, which is the whole of the depth cue.
+        """The cloud deck: bands receding, and two rails converging.
 
-        Each band is a horizontal rule at its own depth. Near bands sit low and
-        far ones bunch toward the horizon, which is the same convergence the
-        contacts obey — so the two read as one space rather than as marks
-        floating over a backdrop.
+        The bands are the depth cue — the difference between "contacts are
+        growing" and "I am flying at them" is carried almost wholly by them
+        streaming past, and a terminal has fewer rows to say it in than a
+        canvas does.
+
+        **The rails are not decoration.** ``world.js`` says why: without them,
+        sliding left and sliding the whole world right look identical, so the
+        camera's lateral drift — which is most of what sells the depth —
+        becomes invisible. They cost two thin lines and they are the only thing
+        on screen that reports which way you are actually leaning.
+
+        Both are projected at both edges rather than scaled from a centre
+        line. The first version multiplied a width by the scale and centred it
+        on the window, which quietly ignored the parallax term and pinned the
+        deck to the frame while everything else moved against it.
         """
-        for z in sorted(self.world.bands, reverse=True):
-            p = projection.point(0, config.SHIP_Y_MAX, z, self.world.cam_x,
-                                 self.world.cam_y)
-            row = top + grid.row(p.y)
-            if not (top <= row < top + rows):
+        cam_x, cam_y = self.world.cam_x, self.world.cam_y
+        horizon_row = top + grid.row(config.HORIZON_Y)
+        bottom = top + rows
+
+        # The ground under the bands, so they read as marks on a surface
+        # rather than as lines in the void.
+        if horizon_row < bottom:
+            r.draw_rect(0, horizon_row, r.width, bottom - horizon_row,
+                        theme.DECK_FAR)
+
+        # Near to far, keeping a gap between drawn bands.
+        #
+        # **This is the one place the terminal cannot simply follow the
+        # canvas.** There a band is a one-to-three pixel line in a hundred and
+        # fifty pixel deck, so thirty of them still leave mostly gap, and the
+        # gap is what the eye reads the motion against. A cell has no fraction
+        # of a row: every band is a full row or nothing, and thirty bands
+        # across the ten rows below the horizon fills every one of them. The
+        # first version did exactly that and produced a wall of tildes with no
+        # motion in it at all.
+        #
+        # So the canvas's alpha-and-thickness ramp becomes row spacing here.
+        # Nearest first, and a band is skipped unless it clears the last drawn
+        # one, which keeps the duty cycle the canvas gets for free.
+        drawn: list[int] = []
+        for z in sorted(self.world.bands):
+            left = projection.point(-DECK_HALF_W, DECK_Y, z, cam_x, cam_y)
+            right = projection.point(DECK_HALF_W, DECK_Y, z, cam_x, cam_y)
+            row = top + grid.row(left.y)
+            if not (horizon_row < row < bottom):
                 continue
-            near = z < config.Z_FIRE_MAX
-            fill = theme.DECK_NEAR if near else theme.DECK_FAR
-            half = max(1, int(grid.col(config.CANVAS_W) * min(1.0, p.s)))
-            start = max(0, r.width // 2 - half // 2)
-            r.ui_text(start, row, theme.DECK_GLYPH * min(half, r.width - start),
-                      fill=fill)
+            if any(abs(row - other) < DECK_ROW_GAP for other in drawn):
+                continue
+
+            c0 = max(0, grid.col(left.x))
+            c1 = min(r.width, grid.col(right.x))
+            if c1 <= c0:
+                continue
+
+            # What is left of the ramp: near bands are heavier and brighter,
+            # far ones thin toward the haze.
+            t = 1 - z / config.DECK_Z_SPAN
+            near = t > 0.55
+            glyph = theme.DECK_GLYPH if near else theme.DECK_FAINT
+            fill = theme.DECK_NEAR if near else theme.DECK_LINE
+            r.ui_text(c0, row, glyph * (c1 - c0), fill=fill)
+            drawn.append(row)
+
+        self._draw_rails(r, grid, top, rows, horizon_row)
+
+    def _draw_rails(self, r, grid, top, rows, horizon_row) -> None:
+        """Two lines from the vanishing point out to the near corners.
+
+        Walked a row at a time and interpolated, because a cell grid has no
+        line primitive and stepping by column would draw a dotted rail wherever
+        the slope is steeper than one cell per column.
+        """
+        cam_x, cam_y = self.world.cam_x, self.world.cam_y
+        vx, vy = projection.vanishing(cam_x, cam_y)
+        v_col, v_row = grid.col(vx), top + grid.row(vy)
+        bottom = top + rows
+
+        for side in (-1, 1):
+            near = projection.point(side * RAIL_NEAR_X, DECK_Y, RAIL_NEAR_Z,
+                                    cam_x, cam_y)
+            n_col, n_row = grid.col(near.x), top + grid.row(near.y)
+            if n_row <= v_row:
+                continue
+            for row in range(max(horizon_row, v_row), min(bottom, n_row + 1)):
+                fraction = (row - v_row) / (n_row - v_row)
+                col = int(v_col + (n_col - v_col) * fraction)
+                if 0 <= col < r.width:
+                    r.ui_text(col, row, theme.RAIL_GLYPH, fill=theme.DECK_LINE)
 
     def _draw_contacts(self, r, grid, top, rows) -> None:
         """Far to near, so a near contact draws over a far one.

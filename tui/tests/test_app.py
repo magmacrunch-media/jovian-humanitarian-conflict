@@ -173,10 +173,18 @@ def test_a_press_fires_exactly_once():
 
 
 def test_the_gun_cools_down_and_fires_again():
+    """Stepped in real frames, not in seconds.
+
+    This used a step of 1 when the scene took dt in frames. It now takes
+    seconds, so a step of 1 is sixty frames — eleven seconds of game time
+    before the second shot, by which point the run is over and firing is
+    correctly refused.
+    """
     app, scene = flying()
     tap(app, "z")
-    for _ in range(config.SHOT_COOLDOWN + 2):
-        app.host.stack.update(1)
+    for _ in range(12):          # 12/30 s = 24 frames, clear of the 9-frame cooldown
+        app.host.stack.update(1 / 30)
+    assert not scene.dead, "the run should still be going"
     tap(app, "z")
     assert len(scene.entities.shots) == 2
 
@@ -357,6 +365,88 @@ def test_resizing_refits_the_frame_rather_than_keeping_a_stale_one():
             app.host.quit()
 
     run(go())
+
+
+# ── The rail, and the unit that drives it ───────────────────────────
+
+
+def test_a_second_of_wall_clock_is_sixty_frames_of_game():
+    """The engine measures dt in seconds; every ported constant is per 60fps
+    frame. Handed straight through, the game ran about sixty times too slow —
+    the ship crawled, the rail barely moved, and nothing looked broken enough
+    to be obviously wrong. Moonlight Drift never met this because it is
+    frame-locked and takes no dt at all.
+    """
+    app, scene = flying()
+    for _ in range(30):
+        app.host.stack.update(1 / 30)
+    expected = config.rail_speed(0) * 60
+    assert scene.world.distance == pytest.approx(expected, rel=0.02)
+
+
+def test_the_ship_crosses_the_rail_in_about_a_second():
+    """The feel that conversion buys, stated as a number. At SHIP_SPEED_MAX the
+    ship covers 324 world units a second against a 168-unit half-rail."""
+    app, scene = flying()
+    app.host.input.press("right")
+    for _ in range(30):
+        app.host.stack.update(1 / 30)
+    assert scene.player.x == pytest.approx(config.SHIP_X_RANGE, abs=1)
+
+
+def test_the_deck_leaves_gaps_between_its_bands():
+    """A canvas draws a band as a one-to-three pixel line in a hundred and
+    fifty pixel deck, so thirty of them still leave mostly gap — and the gap is
+    what the motion reads against. A cell has no fraction of a row, so the
+    first version filled every row below the horizon with tildes and the depth
+    cue vanished into a wall of texture.
+    """
+    app, scene = flying()
+
+    async def go():
+        async with await _piloted(app) as pilot:
+            await pilot.pause()
+            for _ in range(60):
+                app.host.stack.update(1 / 30)
+            await asyncio.sleep(0.3)
+            lines = buffer_text(app).splitlines()
+            below = [line for line in lines[12:22]]
+            banded = [line for line in below if line.count("~") > 10]
+            blank = [line for line in below if line.count("~") == 0]
+            assert banded, "no deck bands drawn at all"
+            assert blank, "every row below the horizon is a band; no gap left"
+            app.host.quit()
+
+    run(go())
+
+
+def test_the_rails_report_which_way_the_camera_leans():
+    """Two lines converging on the vanishing point, and the reason world.js
+    gives for them: without them, sliding left and sliding the whole world
+    right look identical, so the drift that sells the depth is invisible.
+
+    Rendered synchronously, one frame, with no live loop.
+
+    Getting here took two goes. Holding a key decays on a *real* clock, so the
+    first version passed alone and failed under load. Setting the camera and
+    then running a pilot is no better: the pilot advances the game, and the
+    camera chases back toward the ship while the test is watching — which
+    failed about one run in six. A drawing test should depend on nothing but
+    what it drew.
+    """
+    def rails_at(cam_x):
+        app, scene = flying()
+        scene.world.cam_x = cam_x
+        scene.render()
+        lines = buffer_text(app).splitlines()
+        marks = [line for line in lines if line.count(".") >= 2 and "~" not in line]
+        assert marks, "the rails should always be drawn"
+        return [i for i, c in enumerate(marks[-1]) if c == "."]
+
+    left, centre, right = rails_at(-150.0), rails_at(0.0), rails_at(150.0)
+    # Leaning left swings the world right, and the rails with it.
+    assert left[0] > centre[0], "leaning left should push the rails right"
+    assert right[0] < centre[0], "leaning right should push them left"
 
 
 def test_the_game_help_fits_the_smallest_terminal():

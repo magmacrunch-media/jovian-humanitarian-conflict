@@ -134,7 +134,13 @@ BEACON = "+"
 #: you find yourself on the rail.
 SHIP = "<A>"
 SHOT_GLYPH = "|"
+#: The deck. Near bands are drawn heavier than far ones, which is how a
+#: cell says what the canvas says with an alpha ramp.
 DECK_GLYPH = "~"
+DECK_FAINT = "-"
+#: The converging rails. Thin on purpose: they report the camera's lean
+#: and must not compete with the contacts for attention.
+RAIL_GLYPH = "."
 STAR_GLYPH = "·"
 PARTICLE = "·"
 
@@ -168,13 +174,13 @@ def contact_colour(kind: str, *, dim: bool = False) -> str:
 __all__ = [
     "AID", "AID_BEACON", "AID_DARK", "AID_FAR", "AID_NEAR", "AID_PALE",
     "BANDS", "BANNER", "BEACON", "DECK_FAR", "DECK_GLYPH", "DECK_LINE",
-    "DECK_NEAR", "FOOTER_ROWS", "HEADER_ROWS", "HOSTILE", "HOSTILE_DARK",
+    "DECK_FAINT", "DECK_NEAR", "FOOTER_ROWS", "HEADER_ROWS", "HOSTILE", "HOSTILE_DARK",
     "HOSTILE_FAR", "HOSTILE_NEAR", "HUD_DIM", "HUD_TEXT", "LIFE_GLYPH",
     "LIFE_ICON", "MENU_BORDER", "MENU_BOX", "MENU_ITEM_H", "MENU_MIN_COLS",
     "MENU_MIN_ROWS", "MENU_PAD", "MENU_SELECTED", "MENU_SELECTION_BG",
     "MENU_TITLE_H", "MENU_W", "MIN_COLS", "MIN_ROWS", "PARTICLE", "SHIP",
     "SHOT", "SHOT_GLYPH", "SHIP_GLASS", "SHIP_HULL", "STAR", "STAR_GLYPH",
-    "STRIKE", "STRIKE_GLYPH", "SUBTITLE", "TAGLINE", "THRUST", "TITLE",
+    "RAIL_GLYPH", "STRIKE", "STRIKE_GLYPH", "SUBTITLE", "TAGLINE", "THRUST", "TITLE",
     "TITLE_LADDER", "VOID", "VOID_HAZE", "WARN", "contact_colour",
     "contact_glyph",
 ]
