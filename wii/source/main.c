@@ -300,12 +300,24 @@ int main(void) {
 
         renderer_draw_background();
 
+        /* The playfield is scissored to its letterbox and the HUD is not:
+         * world geometry is wider than the frame by design -- a deck band is
+         * 1800 world units across -- and without the clip it runs out over the
+         * letterbox and into the overscan. The HUD is authored against the
+         * whole safe area and must not be cut, so the pair is explicit here
+         * rather than hidden inside the draw calls. */
         if (state == ST_TITLE) {
-            rd_draw_title(&sim.rail, title_frame);
+            rd_playfield_begin();
+            rd_draw_rail(&sim.rail);
+            rd_playfield_end();
+            rd_draw_title_text();
         } else {
+            rd_playfield_begin();
             rd_draw_rail(&sim.rail);
             rd_draw_contacts(&sim);
             rd_draw_player(&sim);
+            rd_playfield_end();
+
             rd_draw_hud(&sim, &run);
             if (state == ST_RESULTS) rd_draw_results(&run);
         }

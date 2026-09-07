@@ -1,17 +1,46 @@
 /* =====================================================================
  * render.c -- The Jovian Humanitarian Conflict (Wii)
  *
- * PLACEHOLDER, and honestly so. See render.h.
+ * Draws state, decides nothing. A port of the drawing halves of
+ * web/js/world.js, entities.js and player.js -- the same shapes, the same
+ * gradients, the same palette, built out of what GX gives us instead of what
+ * the Canvas API gives the browser.
  *
- * Everything is rectangles, lines and circles: no sprite has been drawn for
- * this game yet, and a placeholder built out of primitives is one that cannot
- * quietly become the shipped look by nobody getting round to replacing it.
+ * Nothing here may change simulation state. The day the renderer nudges a
+ * contact is the day `make test` stops being a statement about the game.
  *
- * The one thing here that is NOT a placeholder is the transponder. It is the
- * channel the fairness argument rests on, so it is drawn at a constant design
- * size at every depth, exactly as web/js/entities.js draws it, and the marker
- * is sized in design units rather than screen pixels so a TV does not shrink
- * it to a speck. Replace the hulls freely; leave that alone.
+ * ---------------------------------------------------------------------
+ * How the Canvas calls map onto GX.
+ *
+ * `GRRLIB_NGoneFilled` takes a vertex array and a COLOUR PER VERTEX and draws
+ * a triangle fan, so two things the placeholder faked are now real:
+ *
+ *   ctx.createLinearGradient  ->  a quad whose two ends carry different
+ *                                 colours; GX interpolates across it. vquad()
+ *                                 and hquad() below.
+ *   ctx.moveTo/lineTo/fill    ->  tri(). The hostile silhouette and the ship's
+ *                                 wings are triangles in the browser and were
+ *                                 stacks of rectangles here.
+ *
+ * The one Canvas call with no equivalent is `ctx.clip()` to a circle, which
+ * the browser uses to cut the gas giant's bands to its disc. GX's scissor is
+ * rectangular. So the giant is drawn as horizontal strips chorded to the
+ * circle instead -- see draw_giant(), which also folds the terminator into the
+ * strip colours rather than overdrawing a shadow on top, and so does in one
+ * pass what the browser needs three for.
+ *
+ * ---------------------------------------------------------------------
+ * Two coordinate spaces, and which is which.
+ *
+ * The PLAYFIELD is drawn in the game's own 480x270 design frame -- the
+ * browser's canvas, kept so the tuning transfers -- letterboxed into the
+ * TV-safe area by rd_map_*(). The HUD is drawn in magnolia's 640x480 design
+ * space through ui_draw_*(), because that is what the engine's overscan
+ * handling and font metrics are written against.
+ *
+ * Mixing them is the mistake to watch for: a HUD coordinate passed to
+ * rd_map_x() lands in roughly the right place on NTSC and in the wrong place
+ * on PAL, which is the kind of thing nobody sees until somebody else runs it.
  * ===================================================================== */
 #include <math.h>
 #include <stdio.h>
@@ -71,17 +100,45 @@ void rd_reset_stars(unsigned int seed) {
     }
 }
 
-/* -- Colour helpers ---------------------------------------------------- */
+void rd_playfield_begin(void) {
+    float x = g_ox, y = g_oy;
+    float w = (float)CANVAS_W * g_scale, h = (float)CANVAS_H * g_scale;
+    if (x < 0.0f) { w += x; x = 0.0f; }
+    if (y < 0.0f) { h += y; y = 0.0f; }
+    if (w <= 0.0f || h <= 0.0f) return;
+    GRRLIB_ClipDrawing((u32)x, (u32)y, (u32)w, (u32)h);
+}
 
-/* 0xRRGGBBAA with the alpha replaced by a 0..1 fraction of its own. */
+void rd_playfield_end(void) { GRRLIB_ClipReset(); }
+
+/* -- Colour ------------------------------------------------------------ */
+
+/* 0xRRGGBBAA with the alpha scaled to a fraction of its own. */
 static unsigned int fade(unsigned int rgba, float a) {
     unsigned int base = rgba & 0xFFu;
-    unsigned int alpha;
     if (a < 0.0f) a = 0.0f;
     if (a > 1.0f) a = 1.0f;
-    alpha = (unsigned int)((float)base * a);
-    return (rgba & 0xFFFFFF00u) | alpha;
+    return (rgba & 0xFFFFFF00u) | (unsigned int)((float)base * a);
 }
+
+/* Blend `over` onto `base` by `a`, in the colour channels rather than by
+ * drawing one on top of the other. Used for the gas giant's terminator: the
+ * browser lays a translucent gradient over the finished disc, which costs a
+ * second pass and blends against whatever is behind the planet at the edges.
+ * Folding it into the strip colour has neither problem. */
+static unsigned int mix(unsigned int base, unsigned int over, float a) {
+    unsigned int br = (base >> 24) & 0xFF, bg = (base >> 16) & 0xFF, bb = (base >> 8) & 0xFF;
+    unsigned int orr = (over >> 24) & 0xFF, og = (over >> 16) & 0xFF, ob = (over >> 8) & 0xFF;
+    unsigned int r, g, b;
+    if (a < 0.0f) a = 0.0f;
+    if (a > 1.0f) a = 1.0f;
+    r = (unsigned int)((float)br + ((float)orr - (float)br) * a);
+    g = (unsigned int)((float)bg + ((float)og - (float)bg) * a);
+    b = (unsigned int)((float)bb + ((float)ob - (float)bb) * a);
+    return (r << 24) | (g << 16) | (b << 8) | (base & 0xFFu);
+}
+
+/* -- Primitives, all in design coordinates ----------------------------- */
 
 static void box(float dx, float dy, float dw, float dh, unsigned int color) {
     GRRLIB_Rectangle(rd_map_x(dx), rd_map_y(dy), rd_map_s(dw), rd_map_s(dh),
@@ -97,16 +154,85 @@ static void line(float x1, float y1, float x2, float y2, unsigned int color) {
     GRRLIB_Line(rd_map_x(x1), rd_map_y(y1), rd_map_x(x2), rd_map_y(y2), color);
 }
 
+/* A flat triangle -- ctx.moveTo/lineTo/lineTo/fill. */
+static void tri(float x1, float y1, float x2, float y2, float x3, float y3,
+                unsigned int color) {
+    guVector v[3];
+    u32 c[3];
+    v[0].x = rd_map_x(x1); v[0].y = rd_map_y(y1); v[0].z = 0.0f;
+    v[1].x = rd_map_x(x2); v[1].y = rd_map_y(y2); v[1].z = 0.0f;
+    v[2].x = rd_map_x(x3); v[2].y = rd_map_y(y3); v[2].z = 0.0f;
+    c[0] = c[1] = c[2] = color;
+    GRRLIB_NGoneFilled(v, c, 3);
+}
+
+/* A quad with a vertical gradient -- ctx.createLinearGradient(0,y0,0,y1). */
+static void vquad(float dx, float dy, float dw, float dh,
+                  unsigned int top, unsigned int bottom) {
+    guVector v[4];
+    u32 c[4];
+    float x0 = rd_map_x(dx), x1 = rd_map_x(dx + dw);
+    float y0 = rd_map_y(dy), y1 = rd_map_y(dy + dh);
+    v[0].x = x0; v[0].y = y0; v[0].z = 0.0f; c[0] = top;
+    v[1].x = x1; v[1].y = y0; v[1].z = 0.0f; c[1] = top;
+    v[2].x = x1; v[2].y = y1; v[2].z = 0.0f; c[2] = bottom;
+    v[3].x = x0; v[3].y = y1; v[3].z = 0.0f; c[3] = bottom;
+    GRRLIB_NGoneFilled(v, c, 4);
+}
+
+/* A quad with a horizontal gradient. */
+static void hquad(float dx, float dy, float dw, float dh,
+                  unsigned int left, unsigned int right) {
+    guVector v[4];
+    u32 c[4];
+    float x0 = rd_map_x(dx), x1 = rd_map_x(dx + dw);
+    float y0 = rd_map_y(dy), y1 = rd_map_y(dy + dh);
+    v[0].x = x0; v[0].y = y0; v[0].z = 0.0f; c[0] = left;
+    v[1].x = x1; v[1].y = y0; v[1].z = 0.0f; c[1] = right;
+    v[2].x = x1; v[2].y = y1; v[2].z = 0.0f; c[2] = right;
+    v[3].x = x0; v[3].y = y1; v[3].z = 0.0f; c[3] = left;
+    GRRLIB_NGoneFilled(v, c, 4);
+}
+
+/* ctx.ellipse(...).fill(). GRRLIB draws circles only, and the Spot is half as
+ * tall as it is wide -- drawn as a fan so it is one primitive rather than a
+ * stack of rows. */
+static void ellipse(float cx, float cy, float rx, float ry, unsigned int color) {
+    enum { SEG = 20 };
+    guVector v[SEG + 2];
+    u32 c[SEG + 2];
+    int i;
+    v[0].x = rd_map_x(cx); v[0].y = rd_map_y(cy); v[0].z = 0.0f; c[0] = color;
+    for (i = 0; i <= SEG; i++) {
+        float a = 6.28318530718f * (float)i / (float)SEG;
+        v[i + 1].x = rd_map_x(cx + cosf(a) * rx);
+        v[i + 1].y = rd_map_y(cy + sinf(a) * ry);
+        v[i + 1].z = 0.0f;
+        c[i + 1] = color;
+    }
+    GRRLIB_NGoneFilled(v, c, SEG + 2);
+}
+
 /* -- The rail ---------------------------------------------------------- */
 
+/*
+ * The gas giant, low and left behind the rail.
+ *
+ * Bands are horizontal slabs of a fixed palette rather than a gradient: at
+ * this size a smooth ramp turns to mud, and Jupiter reads as Jupiter because
+ * of the banding, not the colour.
+ *
+ * One strip per two design pixels, chorded to the circle at its own height.
+ * The first version of this drew ONE rectangle per band sized to the band's
+ * widest point, which is not a disc: it is a stepped layer cake, widest below
+ * the equator and never closing at the bottom, and it looked exactly like one.
+ *
+ * The terminator -- the limb away from the rail falling into shadow -- is
+ * folded into each strip's colour rather than laid over the finished disc as
+ * the browser does. Same result, one pass, and no translucent rectangle
+ * hanging off the edges of the planet.
+ */
 static void draw_giant(const JovRail *rail) {
-    /* Bands are horizontal slabs of a fixed palette rather than a gradient: at
-     * this size a smooth ramp turns to mud, and Jupiter reads as Jupiter
-     * because of the banding, not the colour.
-     *
-     * GRRLIB has no clip region, so the disc is approximated by chording each
-     * band to the circle rather than by clipping a rectangle to it. The
-     * arithmetic is the same either way and this needs no state. */
     static const float bands[8][2] = {
         { -1.00f, -0.72f }, { -0.72f, -0.50f }, { -0.50f, -0.30f },
         { -0.30f, -0.10f }, { -0.10f,  0.14f }, {  0.14f,  0.36f },
@@ -121,32 +247,40 @@ static void draw_giant(const JovRail *rail) {
     const float r = 78.0f;
     int i;
 
-    /* One strip per two design pixels, each chorded to the circle at its own
-     * height and coloured by whichever band it falls in.
-     *
-     * The first version of this drew ONE rectangle per band, sized to the
-     * band's widest point. That is not a disc: it is a stepped layer cake,
-     * widest below the equator and never closing at the bottom, and it looked
-     * exactly like one on a TV. Jupiter reads as Jupiter because of the
-     * banding, but only if the banding is on a sphere. */
     for (i = -(int)r; i <= (int)r; i += 2) {
-        float fy = (float)i / r;                   /* -1 at the pole, 0 at the equator */
+        float fy = (float)i / r;                  /* -1 at the pole, 0 at the equator */
         float hw = r * sqrtf(1.0f - fy * fy);
-        int b;
+        float y = cy + (float)i;
         unsigned int col = cols[7];
+        unsigned int l, m, rt;
+        int b;
+
         for (b = 0; b < 8; b++) {
             if (fy >= bands[b][0] && fy < bands[b][1]) { col = cols[b]; break; }
         }
-        box(cx - hw, cy + (float)i, hw * 2.0f, 2.0f, col);
+
+        /* The browser's three gradient stops: 0.62 shadow at the left limb,
+         * clear at 45% across, 0.30 at the right. Two quads, because a single
+         * one interpolates end to end and would wash out the lit band. */
+        l  = mix(col, C_VOID, 0.62f);
+        m  = col;
+        rt = mix(col, C_VOID, 0.30f);
+        hquad(cx - hw, y, hw * 2.0f * 0.45f, 2.0f, l, m);
+        hquad(cx - hw + hw * 2.0f * 0.45f, y, hw * 2.0f * 0.55f, 2.0f, m, rt);
     }
 
-    /* The Spot, sitting in the umber band below the equator. */
-    GRRLIB_Circle(rd_map_x(cx - 22.0f), rd_map_y(cy + 26.0f), rd_map_s(12.0f),
-                  C_SPOT_RED, true);
-    GRRLIB_Circle(rd_map_x(cx - 22.0f), rd_map_y(cy + 26.0f), rd_map_s(6.0f),
-                  C_SPOT_CORE, true);
+    /* The Spot, sitting in the umber band below the equator. Shaded to match
+     * the terminator it sits under. */
+    ellipse(cx - 22.0f, cy + 26.0f, 20.0f, 9.0f, mix(C_SPOT_RED, C_VOID, 0.22f));
+    ellipse(cx - 22.0f, cy + 26.0f, 11.0f, 4.5f, mix(C_SPOT_CORE, C_VOID, 0.22f));
 }
 
+/*
+ * The cloud deck: the rail's floor, drawn as bands streaming toward the
+ * camera. Each band's screen y and width come straight from the projection, so
+ * a band's motion up the screen is the same hyperbolic curve the ships follow.
+ * Drawn far to near so nearer bands overlap the haze behind them.
+ */
 static void draw_deck(const JovRail *rail) {
     const float DECK_Y = 150.0f;   /* world y of the deck surface, below the ship */
     const float HALF = 900.0f;     /* world half-width of a band */
@@ -154,21 +288,17 @@ static void draw_deck(const JovRail *rail) {
     int i, j;
     ProjPoint v;
 
-    /* Deck ground, horizon to the bottom of the frame. Two flat slabs stand in
-     * for the browser's gradient. */
-    box(0.0f, HORIZON_Y, (float)CANVAS_W, ((float)CANVAS_H - HORIZON_Y) * 0.5f,
-        C_DECK_FAR);
-    box(0.0f, HORIZON_Y + ((float)CANVAS_H - HORIZON_Y) * 0.5f, (float)CANVAS_W,
-        ((float)CANVAS_H - HORIZON_Y) * 0.5f, C_DECK_NEAR);
+    /* Deck ground, horizon to the bottom of the frame. */
+    vquad(0.0f, HORIZON_Y, (float)CANVAS_W, (float)CANVAS_H - HORIZON_Y,
+          C_DECK_FAR, C_DECK_NEAR);
 
-    /* Far to near, so nearer bands overlap the haze behind them. */
     for (i = 0; i < RAIL_BANDS; i++) order[i] = i;
     for (i = 1; i < RAIL_BANDS; i++) {
-        int v2 = order[i];
-        for (j = i - 1; j >= 0 && rail->bands[order[j]] < rail->bands[v2]; j--) {
+        int k = order[i];
+        for (j = i - 1; j >= 0 && rail->bands[order[j]] < rail->bands[k]; j--) {
             order[j + 1] = order[j];
         }
-        order[j + 1] = v2;
+        order[j + 1] = k;
     }
 
     for (i = 0; i < RAIL_BANDS; i++) {
@@ -188,18 +318,17 @@ static void draw_deck(const JovRail *rail) {
      * the whole world right look identical. */
     v = proj_vanishing(rail->cam_x, rail->cam_y);
     for (i = -1; i <= 1; i += 2) {
-        ProjPoint near_p = proj_point((float)i * 210.0f, DECK_Y, 20.0f,
-                                      rail->cam_x, rail->cam_y);
-        line(v.x, v.y, near_p.x, near_p.y, fade(C_DECK_LINE, 0.30f));
+        ProjPoint n = proj_point((float)i * 210.0f, DECK_Y, 20.0f,
+                                 rail->cam_x, rail->cam_y);
+        line(v.x, v.y, n.x, n.y, fade(C_DECK_LINE, 0.30f));
     }
 }
 
 void rd_draw_rail(const JovRail *rail) {
     int i;
 
-    /* Void above the horizon. */
-    box(0.0f, 0.0f, (float)CANVAS_W, HORIZON_Y * 0.5f, C_VOID);
-    box(0.0f, HORIZON_Y * 0.5f, (float)CANVAS_W, HORIZON_Y * 0.5f, C_VOID_HAZE);
+    /* Void above the horizon, dark at the top and hazing toward the deck. */
+    vquad(0.0f, 0.0f, (float)CANVAS_W, HORIZON_Y, C_VOID, C_VOID_HAZE);
 
     /* Stars shift a little against the camera so the void is not a decal. */
     for (i = 0; i < STAR_COUNT; i++) {
@@ -226,11 +355,13 @@ static void draw_contact(const JovSim *sim, const JovContact *c) {
 
     if (is_aid) {
         /* Blunt slab with a bar across it -- legible as "not a fighter" from
-         * Z_SHAPE_READABLE inward, well before it can be shot. */
+         * Z_SHAPE_READABLE inward, well before it can be shot. Deliberately
+         * rectangular: the silhouette channel works by being the opposite
+         * shape to the hostile's delta, so squaring it off is the point. */
         box(p.x - w / 2.0f, p.y - h / 2.0f, w, h, C_AID_DARK);
         box(p.x - w / 2.0f, p.y - h / 2.0f, w, fmaxf(1.0f, h * 0.55f), C_AID);
         /* The cross bar. Kept at least a pixel so it survives the far
-         * distances. */
+         * distances -- at spawn depth this is the only part still resolvable. */
         box(p.x - w * 0.09f, p.y - h / 2.0f, fmaxf(1.0f, w * 0.18f), h, C_AID_PALE);
         box(p.x - w / 2.0f, p.y - h * 0.09f, w, fmaxf(1.0f, h * 0.18f), C_AID_PALE);
 
@@ -241,27 +372,25 @@ static void draw_contact(const JovSim *sim, const JovContact *c) {
                       w + 6.0f, h + 6.0f, C_WARN);
         }
     } else {
-        /* Angular delta, nose toward the camera. Four stacked slabs stand in
-         * for the browser's triangle -- crude, and still unmistakably not the
-         * convoy's slab, which is the only job the silhouette channel has. */
-        int i;
-        for (i = 0; i < 4; i++) {
-            float f = (float)i / 4.0f;
-            float bw = w * (1.0f - f * 0.75f);
-            box(p.x - bw / 2.0f, p.y - h / 2.0f + h * f * 0.98f, bw, h * 0.26f,
-                i == 0 ? C_HOSTILE_DARK : C_HOSTILE);
-        }
+        /* Angular delta, nose toward the camera. A real triangle now: the
+         * placeholder stacked four rectangles, which read as a staircase at
+         * the near distances where the silhouette is supposed to be doing its
+         * job. */
+        tri(p.x, p.y + h / 2.0f,
+            p.x - w / 2.0f, p.y - h / 2.0f,
+            p.x + w / 2.0f, p.y - h / 2.0f, C_HOSTILE_DARK);
+        tri(p.x, p.y + h * 0.28f,
+            p.x - w * 0.32f, p.y - h / 2.0f,
+            p.x + w * 0.32f, p.y - h / 2.0f, C_HOSTILE);
         if (p.s > 0.4f) box(p.x - 1.0f, p.y - h * 0.2f, 2.0f, 2.0f, C_HOSTILE_EYE);
     }
 
     /* -- The transponder --
      * Drawn at a CONSTANT design size regardless of depth. That is the whole
      * point: it is the one channel that does not shrink into illegibility, so
-     * a convoy is identifiable on the frame it appears. */
+     * a convoy is identifiable on the frame it appears. Halo first, core over
+     * it -- the other order washes the bright mark out under its own halo. */
     if (jov_beacon_lit(c, sim->frame)) {
-        /* Halo first, core over it. The other order washes the bright mark out
-         * under its own translucent halo, which is exactly the channel this is
-         * not allowed to weaken. */
         box(p.x - 4.0f, p.y - h / 2.0f - 8.0f, 8.0f, 8.0f, fade(C_AID_BEACON, 0.30f));
         box(p.x - 2.0f, p.y - h / 2.0f - 6.0f, 4.0f, 4.0f, C_AID_BEACON);
     }
@@ -344,16 +473,18 @@ void rd_draw_contacts(const JovSim *sim) {
         box(s.x, s.y, size, size, fade(p->color, p->life / p->max));
     }
 
+    /* Popups. These were the frames that used to blow the budget, back when
+     * every glyph was a FreeType load; magnolia caches them now and a popup
+     * costs about as much as the explosion under it. */
     for (i = 0; i < sim->n_popups; i++) {
         const JovPopup *p = &sim->popups[i];
         ProjPoint s = proj_point(p->x, p->y, p->z, sim->rail.cam_x, sim->rail.cam_y);
         float a = p->life / (p->max * 0.5f);
         u32 tw;
         if (a > 1.0f) a = 1.0f;
-        if (!ttf_font) continue;
-        tw = GRRLIB_WidthTTF(ttf_font, p->text, 12);
-        GRRLIB_PrintfTTF((int)(rd_map_x(s.x) - (float)tw * 0.5f), (int)rd_map_y(s.y),
-                         ttf_font, p->text, 12, fade(p->color, a));
+        tw = text_width(p->text, 12);
+        text_draw((int)(rd_map_x(s.x) - (float)tw * 0.5f), (int)rd_map_y(s.y),
+                  p->text, 12, fade(p->color, a));
     }
 }
 
@@ -393,13 +524,22 @@ void rd_draw_player(const JovSim *sim) {
     box(sp.x - 5.0f, sp.y + h * 0.5f, 2.0f, 4.0f * flick, C_THRUST_HOT);
     box(sp.x + 3.0f, sp.y + h * 0.5f, 2.0f, 4.0f * flick2, C_THRUST_HOT);
 
-    /* Wings. Banking lifts one tip and drops the other -- a cheap fake roll
-     * that reads correctly at this size and costs no transform. */
-    box(sp.x - w / 2.0f, sp.y - 2.0f + b * 5.0f, w / 2.0f - 5.0f, 4.0f, C_SHIP_STEEL);
-    box(sp.x + 5.0f,     sp.y - 2.0f - b * 5.0f, w / 2.0f - 5.0f, 4.0f, C_SHIP_STEEL);
+    /* Wings, as the browser draws them: two triangles whose outboard tip
+     * rises or falls with the bank. A cheap fake roll that reads correctly at
+     * this size and costs no transform -- and the reason it has to be a
+     * triangle is that the tip is the only part that moves. */
+    tri(sp.x - w / 2.0f, sp.y + 2.0f + b * 5.0f,
+        sp.x - 5.0f,     sp.y - 2.0f,
+        sp.x - 5.0f,     sp.y + 5.0f, C_SHIP_STEEL);
+    tri(sp.x + w / 2.0f, sp.y + 2.0f - b * 5.0f,
+        sp.x + 5.0f,     sp.y - 2.0f,
+        sp.x + 5.0f,     sp.y + 5.0f, C_SHIP_STEEL);
 
-    /* Hull, shadow, canopy. */
-    box(sp.x - 5.0f, sp.y - h / 2.0f - 3.0f, 10.0f, h / 2.0f + 7.0f, C_SHIP_HULL);
+    /* Hull: a nose-up triangle, not the rectangle the placeholder used. */
+    tri(sp.x,        sp.y - h / 2.0f - 3.0f,
+        sp.x + 5.0f, sp.y + 4.0f,
+        sp.x - 5.0f, sp.y + 4.0f, C_SHIP_HULL);
+
     box(sp.x - 5.0f, sp.y + 4.0f, 10.0f, 2.0f, C_SHIP_SHADOW);
     box(sp.x - 2.0f, sp.y - 4.0f, 4.0f, 4.0f, C_SHIP_GLASS);
 }
@@ -440,7 +580,7 @@ void rd_draw_hud(const JovSim *sim, const JovRun *run) {
     for (i = 0; i < n; i++) {
         const JovContact *c = &sim->contacts[order[i]];
         int is_aid = c->kind == JOV_AID;
-        int x = 40 + (int)((c->x + SPAWN_X_RANGE) / (SPAWN_X_RANGE * 2.0f) * 560.0f);
+        int x = 116 + (int)((c->x + SPAWN_X_RANGE) / (SPAWN_X_RANGE * 2.0f) * 484.0f);
         GRRLIB_Rectangle((f32)ui_map_x(x), (f32)ui_map_y(452),
                          (f32)ui_map_w(is_aid ? 10 : 5), (f32)ui_map_h(6),
                          is_aid ? C_AID : C_HOSTILE, true);
@@ -454,9 +594,7 @@ void rd_draw_hud(const JovSim *sim, const JovRun *run) {
 
 /* -- Cards ------------------------------------------------------------- */
 
-void rd_draw_title(const JovRail *rail, float frame) {
-    rd_draw_rail(rail);
-    (void)frame;
+void rd_draw_title_text(void) {
     ui_draw_centered_text(150, "THE JOVIAN", 30, C_AID);
     ui_draw_centered_text(190, "HUMANITARIAN CONFLICT", 22, C_AID);
     ui_draw_centered_text(250, "KNOW WHAT YOU ARE SHOOTING AT", 12, C_HUD_DIM);

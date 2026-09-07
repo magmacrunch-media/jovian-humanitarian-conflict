@@ -46,6 +46,22 @@ float rd_map_s(float design_units);   /* a length, not a position */
  * three of which are reasons to keep them out of the tested translation unit. */
 void rd_reset_stars(unsigned int seed);
 
+/* Confine drawing to the playfield's letterbox, and release it again.
+ *
+ * The browser gets this free: a canvas clips at its own edges, so world.js can
+ * draw a deck band 1800 world units wide and see only the part that lands on
+ * the canvas. GX does not clip, so the same band ran out across the letterbox
+ * and into the TV's overscan -- long horizontal lines to the left and right of
+ * the picture, which read as a rendering fault rather than as a deck.
+ *
+ * Paired explicitly rather than being set inside rd_draw_rail(), because the
+ * title card draws the rail and then draws TEXT over it, and text belongs to
+ * the HUD's coordinate space and its own full safe area. A clip left on would
+ * cut the title in half.
+ */
+void rd_playfield_begin(void);
+void rd_playfield_end(void);
+
 /* The world behind the rail: void, stars, the gas giant, the cloud deck. */
 void rd_draw_rail(const JovRail *rail);
 
@@ -60,8 +76,10 @@ void rd_draw_player(const JovSim *sim);
  * identification channel, and the one that survives a cluttered frame. */
 void rd_draw_hud(const JovSim *sim, const JovRun *run);
 
-/* Title card and results card. */
-void rd_draw_title(const JovRail *rail, float frame);
+/* Title card and results card. The title's BACKDROP is the ordinary rail,
+ * which main.c draws inside the playfield clip; this is only the lettering
+ * over it, which belongs to the HUD's space and must not be clipped. */
+void rd_draw_title_text(void);
 void rd_draw_results(const JovRun *run);
 
 /* Screen shake and the friendly-fire flash, both driven by JovCue. Decays on

@@ -15,12 +15,13 @@ The **rules are ported and tested**. `source/sim.c` is a port of the browser's
 cases ported case for case — plus a few the console needs and a browser does
 not.
 
-What you can see is a **placeholder**. `source/render.c` draws the whole game
-out of rectangles, lines and circles: the banded giant, the deck streaming past,
-contacts and their transponders, the lock links and countdowns, the ship, the
-HUD. Enough to play; not the look. One part of it is not a placeholder and is
-marked as such — the transponder, which is the channel the whole premise rests
-on.
+The **renderer is ported too**. `source/render.c` follows the browser's drawing
+calls — the banded giant with its terminator, the gradient void and deck, the
+deck bands streaming past, convoys as slabs and hostiles as deltas, the lock
+links and countdowns, the ship, the HUD. The browser has no sprite assets: it
+draws everything procedurally through the Canvas API, so `sprites/` is empty
+because there is nothing to put in it. See `AGENTS.md` for the three places this
+deviates on purpose.
 
 There is **no sound at all**, which is unusual here and is inherited rather than
 skipped: the web version's music lives on the website's jukebox and its six
@@ -40,10 +41,10 @@ wii/
 │   ├── config.h      the rail, the palette, and every tunable number
 │   ├── projection.c  the pseudo-3D transform — pure maths, no engine
 │   ├── sim.c         the ship, the rail, the contacts, the IFF rules, scoring
-│   ├── render.c      draws state, decides nothing (placeholder)
+│   ├── render.c      draws state, decides nothing
 │   └── main.c        the engine, the clock, the controller, the three screens
 ├── tests/            host tests, no console and no cross-compiler needed
-├── sprites/          PNGs, embedded by bin2s (empty so far)
+├── sprites/          PNGs, embedded by bin2s (empty: nothing to put here)
 └── audio/            raw PCM, embedded by bin2s (empty, and see above)
 ```
 

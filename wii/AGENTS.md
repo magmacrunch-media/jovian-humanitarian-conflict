@@ -16,25 +16,41 @@ not repeat them.
 for case — 82 checks, run by `make test` with nothing but a C compiler. The
 port was checked by mutation as well as by running; see below.
 
-**Placeholder:** `source/render.c`. It compiles, it builds a `.dol`, and it
-draws the whole game — the banded giant, the streaming deck, contacts, locks,
-countdowns, the ship and the HUD — but out of rectangles, lines and circles.
-The look it has to grow into is `web/js/world.js`, `entities.js` and
-`player.js`. The one part of it that is **not** a placeholder is the
-transponder; see below. The performance problem it used to have was in the
-engine's text drawing and is fixed; the section below is now history rather
-than a warning.
+**Finished:** `source/render.c`. No longer a placeholder — it is a port of the
+drawing halves of `web/js/world.js`, `entities.js` and `player.js`, with the
+same shapes, the same gradients and the same palette.
 
-Two bugs in it were found by *looking at a frame* rather than by any test, which
-is the argument for capturing one whenever this changes. The gas giant was drawn
-as one rectangle per band sized to that band's widest point — a stepped layer
-cake, widest below the equator and never closing at the bottom, which is not a
-sphere and looked like it. And the beacon drew its bright core first and its
-translucent halo over the top, washing out the one mark that must not be weak.
-Both are fixed; neither was anything a host test could have caught.
+Worth being clear about what "port" means here, because it is not the usual
+thing: the browser has **no sprite assets**. It draws everything procedurally
+through the Canvas API, so matching it means matching its *drawing calls*, not
+baking its output into PNGs. `sprites/` is empty because there is nothing to
+put in it, not because nobody has got round to it.
 
-**Absent:** all audio, sprites, the scoreboard, an attract mode. magnolia
-brings scoring up in `magnolia_init()` and none of it is wired.
+Three deviations from the browser, all deliberate:
+
+- **The gas giant's terminator is folded into the band colours** rather than
+  laid over the finished disc as a translucent gradient. GX has no circular
+  clip, so the disc is drawn as horizontal strips chorded to the circle; once
+  you are doing that, shading each strip as it goes is one pass instead of
+  three and does not blend against whatever is behind the planet at the limb.
+- **The beacon's halo is a translucent square, not a radial gradient.** The
+  browser has `Renderer.glow`; this has eight pixels of 30% white behind four
+  of solid. At the size the mark is drawn, the difference is invisible.
+- **Popups are drawn at a fixed size 12** rather than the browser's 6px scaled
+  by depth. A 6px glyph on a TV is not a glyph.
+
+Two earlier bugs in this file were found by *looking at a frame* rather than by
+any test, which is the argument for capturing one whenever it changes. The gas
+giant was drawn as one rectangle per band sized to that band's widest point — a
+stepped layer cake, widest below the equator and never closing at the bottom,
+which is not a sphere and looked like one. And the beacon drew its bright core
+first and its translucent halo over the top, washing out the one mark that must
+not be weak. Neither was anything a host test could have caught, and the second
+would have degraded the fairness channel while looking fine in the source.
+
+**Absent:** all audio, the scoreboard, an attract mode. magnolia brings scoring
+up in `magnolia_init()` and none of it is wired. (Not sprites — see above; the
+browser has none either.)
 
 **Run in Dolphin, 2026-09-06, and not yet on real hardware.** Under
 `AUTOPILOT=1` it boots, plays a full run and shuts itself down: 17.8 seconds,
@@ -107,6 +123,22 @@ slow", which everybody already knew.
 Text is now cheap enough to stop thinking about: a whole results card is 380us
 against a 16667us frame. It is not free, so do not put a thousand glyphs on
 screen, but it no longer shapes what this renderer can do.
+
+## The playfield is scissored; the HUD is not
+
+A canvas clips at its own edges, so the browser can draw a deck band 1800 world
+units wide and see only the part that lands on it. GX does not clip, and the
+first version of this renderer let those bands run out across the letterbox and
+into the overscan — long horizontal lines either side of the picture, which read
+as a rendering fault rather than as a deck.
+
+`rd_playfield_begin()` / `rd_playfield_end()` set a GX scissor around the
+letterbox, and `main.c` wraps the rail, the contacts and the ship in them. The
+pair is explicit rather than hidden inside `rd_draw_rail()` for one reason: the
+title card draws the rail and then draws lettering over it, and the lettering
+belongs to the HUD's full-safe-area space. A clip left on would cut the title in
+half — which is why `rd_draw_title_text()` is separate from the backdrop rather
+than one call that does both.
 
 ## The transponder is the one thing in render.c you may not simplify
 
@@ -305,6 +337,13 @@ looking and could not have been found any other way. Two things about it:
 And pin the window with `SetWindowPos(HWND_TOPMOST)` rather than
 `SetForegroundWindow`, which is refused to a background process while another
 application holds focus, silently.
+
+**Both builds write `build/jovian.dol`.** A plain `make` and a `make
+CFLAGS='... -DAUTOPILOT=1'` produce the same path, so whichever ran last is what
+is sitting there -- and an autopilot binary staged as the normal one plays a run
+on its own and then exits, which in Dolphin looks like a magenta screen and a
+"stop the current emulation?" prompt rather than like the wrong binary. `make
+clean` between them, and check the hash if a capture surprises you.
 
 `AUTOPILOT_EVERY` sets the reaction time in frames. Verified 2026-09-06:
 `AUTOPILOT` defaults to 0 and compiles away entirely — the default build and an
