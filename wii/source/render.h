@@ -28,6 +28,8 @@
 #ifndef RENDER_H
 #define RENDER_H
 
+#include <magnolia.h>
+
 #include "sim.h"
 
 /* Recompute the playfield's letterbox from the running video mode and the
@@ -76,10 +78,28 @@ void rd_draw_player(const JovSim *sim);
  * identification channel, and the one that survives a cluttered frame. */
 void rd_draw_hud(const JovSim *sim, const JovRun *run);
 
-/* Title card and results card. The title's BACKDROP is the ordinary rail,
- * which main.c draws inside the playfield clip; this is only the lettering
- * over it, which belongs to the HUD's space and must not be clipped. */
+/* The cards. Each is lettering over whatever main.c has already drawn behind
+ * it, and all of them belong to the HUD's coordinate space -- the full safe
+ * area, outside the playfield clip. The title's BACKDROP is the ordinary rail,
+ * which is why the title is text-only here.
+ *
+ * These follow magnolia's score-attack shell: title, ready, play, pause, game
+ * over, initials on a qualifying score, then the table. The shell owns the
+ * transitions and the initials editor; this owns what they look like. */
 void rd_draw_title_text(void);
+
+/* The briefing. This game's whole premise is one rule, and a player who has not
+ * been told it will shoot a convoy in the first ten seconds and not know why
+ * the run ended -- so the two contact types are drawn side by side, which is
+ * the same thing the scripted opening wave does. */
+void rd_draw_ready(float frame);
+
+void rd_draw_paused(void);
+
+/* The initials editor and the table. `gs` is magnolia's state machine, which
+ * holds the cursor and the letter under it. */
+void rd_draw_initials(const GameStateMachine *gs, const JovRun *run);
+void rd_draw_scores(const GameStateMachine *gs);
 void rd_draw_results(const JovRun *run);
 
 /* Screen shake and the friendly-fire flash, both driven by JovCue. Decays on

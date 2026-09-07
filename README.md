@@ -12,7 +12,7 @@ costs you the run.
 |---|---|
 | `web/` | Browser version. Vanilla JS over the Canvas API. Play it at [magmacrunch.com](https://magmacrunch.com/arcade/jovian-humanitarian-conflict/) |
 | `tui/` | Terminal version, on the `magmacrunch.engine` TUI engine. `python -m jovian`, and a cabinet in the arcade. Publishes as `magmacrunch-jhc` |
-| `wii/` | Wii version, on [magnolia](../../engines/magnolia). Rules, renderer and audio all ported, runs in Dolphin at 60fps; not yet on real hardware. See `wii/README.md` |
+| `wii/` | Wii version, on [magnolia](../../engines/magnolia). Rules, renderer, audio and scoreboard all in, runs in Dolphin at 60fps; not yet on real hardware. See `wii/README.md` |
 
 `web/` is the source of truth for rules and tuning. The website repo copies it
 into `arcade/jovian-humanitarian-conflict/` for deployment; its copy is

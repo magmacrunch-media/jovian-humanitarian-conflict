@@ -200,6 +200,95 @@ Text is now cheap enough to stop thinking about: a whole results card is 380us
 against a 16667us frame. It is not free, so do not put a thousand glyphs on
 screen, but it no longer shapes what this renderer can do.
 
+## A large .bss array broke the glyph cache, and that is not a joke
+
+**Read this before adding any big array to this game.**
+
+`sfx_pool` in `main.c` is declared `= { 1 }`. That single initialiser puts it in
+`.data` instead of `.bss`, and it is the difference between a game with text and
+a game without.
+
+As a `.bss` array it broke **the engine's glyph cache**. Not audio -- text. Every
+string silently stopped drawing: the HUD score, the combo, `CONTACTS`, the
+results card, the whole scoreboard. Rectangles drew. The world drew. The cache
+reported itself perfectly healthy the entire time:
+
+```
+text: enabled=1 entries=34 hits=37518 misses=34 evictions=0 bytes=20736
+```
+
+Its bookkeeping was correct. The textures those entries pointed at had been
+overwritten.
+
+The bisect, because the shape of it is the transferable part:
+
+| tried | text |
+|---|---|
+| audio bring-up disabled entirely | works |
+| `audio_init()` only, no effects rendered | works |
+| effects rendered, none loaded into ASND | **broken** |
+| all eight rendered to the SAME offset in the pool | works |
+| spread across the pool as normal, array moved to `.data` | works |
+
+So it is not ASND, not the music, not the loader, and not the synthesis -- it is
+*writing across a large `.bss` array*. The glyph cache rasterises lazily on the
+first frame, which is after audio has been set up, so its allocations land in
+memory the pool writes had already trampled. The `.dol`'s `.bss` region and the
+heap overlap somewhere past the start of `.bss`.
+
+**The mechanism underneath is not understood.** Whether it is the loader,
+libogc's arena calculation, or something about a `.dol` this size was not
+established, and this note says so rather than inventing a reason. What is
+measured is the trigger and the fix.
+
+Two things follow. Do not tidy the initialiser away -- it costs 180KB in the
+`.dol` and buys text that renders. And any other large array added here should
+be initialised too: this one was found because it broke something loud and
+completely unrelated, and a smaller one might just quietly corrupt a score.
+
+**The wider lesson is about how it was missed.** It shipped. When the audio went
+in, it was verified by dumping Dolphin's audio and measuring the WAV -- which
+was thorough about audio and looked at no pixels at all. A screenshot at any
+point in that work would have caught it immediately. Capture a frame whenever
+anything changes, even when the change has nothing to do with drawing.
+
+## The scoreboard is magnolia's shell, not a hand-rolled one
+
+`main.c` used to run three states of its own. The engine ships the whole
+score-attack shell -- title, ready, play, pause, game over, initials on a
+qualifying score, then the table -- and `gamestate.h` makes the argument for
+taking it: the initials editor "is fiddly enough that every game copying it
+would mean every game copying its bugs". It owns the transitions and the editor;
+this game owns what each card looks like and when a run ends.
+
+`scoring_add_entry()` saves the table itself, so committing initials persists
+without a separate call. `scoring_persisted()` answers whether the card is
+actually writable -- magnolia probes it with a real write at startup -- and both
+the initials card and the table say so when it is not, rather than appearing to
+forget scores at random.
+
+Two consequences worth knowing:
+
+- **A is not a fire button any more.** The shell advances every card with A, so
+  a run beginning on A would begin with A still held and fire a shot on the
+  first frame at whatever happened to be in front. The browser hit exactly this
+  and `main.js` says so: "the Space that starts a run is still sitting in
+  justPressed on frame 1". Fire is 1 or 2, which is where the thumb is anyway on
+  a sideways grip.
+- **The table keeps initials and a score, and nothing else.** The web version
+  sends `escorted`, `lost`, `kills` and `strikes` to its score server;
+  magnolia's `ScoreEntry` is initials and score, and its header explains why it
+  is not more -- a previous version carried one game's statistics through the
+  engine's struct, API, save format and tests without a single site reading them
+  back. A game that wants a richer record should design it against what it
+  displays.
+
+Under `AUTOPILOT` the end-of-run cards are walked automatically, because nobody
+is going to press A. It drives the shell directly rather than synthesising
+input, and it means the initials editor and the table are exercised by an
+unattended run -- which matters, because they are the two screens a player
+reaches exactly once and only after doing well.
+
 ## The playfield is scissored; the HUD is not
 
 A canvas clips at its own edges, so the browser can draw a deck band 1800 world

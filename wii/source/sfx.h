@@ -53,6 +53,12 @@ typedef enum {
  * silently truncate a sound. */
 #define SFX_MAX_SAMPLES ((SFX_RATE * 3) / 4)
 
+/* Total samples across all eight effects, with margin. Sized against what they
+ * actually render -- 73,813 at SFX_RATE -- rather than SFX_COUNT * the longest,
+ * which is 384KB for 144KB of sound. tests/test_sfx.c asserts the real total
+ * fits, so a longer effect fails the suite instead of the console. */
+#define SFX_POOL_SAMPLES 90000
+
 /* Render one effect as signed 16-bit mono into `out`, and return the number of
  * samples written -- 0 if `id` is unknown or the buffer is too small.
  *

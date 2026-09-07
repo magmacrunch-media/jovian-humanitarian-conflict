@@ -603,6 +603,138 @@ void rd_draw_title_text(void) {
     ui_draw_centered_text(400, "PRESS A", 16, C_SHIP_GLASS);
 }
 
+/* A convoy and a hostile, drawn at the size and shape they appear at in play,
+ * with the transponder blinking on the convoy exactly as it will in the game.
+ * The blink is the point: it is channel one, and this is the only place the
+ * player is shown it without also being shot at. */
+void rd_draw_ready(float frame) {
+    JovContact aid, hostile;
+    JovSim stub;
+
+    memset(&stub, 0, sizeof(stub));
+    stub.frame = frame;
+
+    memset(&aid, 0, sizeof(aid));
+    aid.kind = JOV_AID;
+    aid.x = -70.0f; aid.y = -6.0f; aid.z = 60.0f;
+
+    memset(&hostile, 0, sizeof(hostile));
+    hostile.kind = JOV_HOSTILE;
+    hostile.x = 70.0f; hostile.y = -6.0f; hostile.z = 60.0f;
+
+    ui_draw_dim_overlay(fade(C_VOID, 0.72f));
+    ui_draw_centered_text(60, "KNOW WHAT YOU ARE SHOOTING AT", 16, C_HUD_TEXT);
+
+    rd_playfield_begin();
+    draw_contact(&stub, &aid);
+    draw_contact(&stub, &hostile);
+    rd_playfield_end();
+
+    ui_draw_text_centered_in(60, 250, 260, 30, "AID CONVOY", 14, C_AID);
+    ui_draw_text_centered_in(60, 272, 260, 30, "DOUBLE BLINK - HOLD FIRE", 10, C_HUD_DIM);
+    ui_draw_text_centered_in(320, 250, 260, 30, "HOSTILE", 14, C_HOSTILE);
+    ui_draw_text_centered_in(320, 272, 260, 30, "DARK - SHOOT IT", 10, C_HUD_DIM);
+
+    ui_draw_centered_text(330, "D-PAD FLIES    1 OR 2 FIRES    + PAUSES", 12, C_HUD_TEXT);
+    ui_draw_centered_text(356, "SHOOT A CONVOY AND IT COSTS YOU THE RUN", 12, C_WARN);
+    ui_draw_centered_text(410, "PRESS A", 16, C_SHIP_GLASS);
+}
+
+void rd_draw_paused(void) {
+    ui_draw_dim_overlay(fade(C_VOID, 0.70f));
+    ui_draw_centered_text(210, "PAUSED", 30, C_HUD_TEXT);
+    ui_draw_centered_text(260, "+ TO RESUME    HOME TO QUIT", 12, C_HUD_DIM);
+}
+
+/*
+ * The initials editor.
+ *
+ * magnolia owns the editing -- left and right change the letter, up sets it,
+ * down sets it and advances, A commits -- so this only has to make the state
+ * legible. The one thing it must get right is which slot is being edited: the
+ * cursor is the only feedback the player has that up and down did anything.
+ */
+void rd_draw_initials(const GameStateMachine *gs, const JovRun *run) {
+    char buf[48];
+    int i;
+    const int SLOT_W = 60;
+    const int X0 = 320 - (SLOT_W * 3) / 2;
+
+    ui_draw_dim_overlay(fade(C_VOID, 0.85f));
+
+    snprintf(buf, sizeof(buf), "RANK %d", gs->rank);
+    ui_draw_centered_text(90, buf, 22, C_AID);
+    snprintf(buf, sizeof(buf), "%d", run->score);
+    ui_draw_centered_text(130, buf, 26, C_HUD_TEXT);
+
+    for (i = 0; i < 3; i++) {
+        int x = X0 + i * SLOT_W;
+        int editing = (i == gs->cursor_pos);
+        /* The letter under the cursor comes from selected_letter, not from the
+         * string: the shell only writes it into initials[] when up or down is
+         * pressed, so drawing the string would show the previous letter while
+         * the player is scrolling through them. */
+        char ch[2];
+        ch[0] = editing ? (char)('A' + gs->selected_letter) : gs->initials[i];
+        ch[1] = '\0';
+
+        ui_draw_panel(x + 6, 200, SLOT_W - 12, 56,
+                      editing ? 0x1A2340FF : 0x10152AFF,
+                      editing ? C_SHIP_GLASS : C_HUD_DIM, 3);
+        ui_draw_text_centered_in(x + 6, 200, SLOT_W - 12, 56, ch, 26,
+                                 editing ? C_HUD_TEXT : C_HUD_DIM);
+    }
+
+    ui_draw_centered_text(280, "LEFT/RIGHT PICK    DOWN NEXT    A DONE", 11, C_HUD_DIM);
+
+    if (!scoring_persisted()) {
+        /* magnolia probes the card with a real write at startup, so this is
+         * known before a run is even played. Saying it here rather than
+         * silently failing is the whole reason that probe exists. */
+        ui_draw_centered_text(330, "NO SD CARD - THIS SCORE WILL NOT BE KEPT", 11, C_WARN);
+    }
+}
+
+/*
+ * The table. Ten rows at most, and the row just entered is picked out -- after
+ * typing three letters the first thing anybody looks for is their own line.
+ */
+void rd_draw_scores(const GameStateMachine *gs) {
+    char buf[48];
+    int n = scoring_get_count();
+    int i;
+
+    ui_draw_dim_overlay(fade(C_VOID, 0.88f));
+    ui_draw_centered_text(50, "BEST RUNS", 22, C_AID);
+
+    if (n <= 0) {
+        ui_draw_centered_text(200, "NO RUNS RECORDED", 14, C_HUD_DIM);
+    }
+
+    for (i = 0; i < n && i < 10; i++) {
+        const ScoreEntry *e = scoring_get_entry(i);
+        int y = 100 + i * 30;
+        /* gs->rank is 1-based and set when the run qualified; 0 means it did
+         * not, in which case nothing is highlighted. */
+        int mine = (gs->rank > 0 && gs->rank == i + 1);
+        u32 col = mine ? C_AID : C_HUD_TEXT;
+        if (!e) continue;
+
+        if (mine) ui_draw_panel(120, y - 4, 400, 28, 0x1A2340FF, C_AID, 3);
+
+        snprintf(buf, sizeof(buf), "%2d", i + 1);
+        ui_draw_text_shadow(140, y, buf, 14, mine ? C_AID : C_HUD_DIM);
+        ui_draw_text_shadow(200, y, e->initials, 14, col);
+        snprintf(buf, sizeof(buf), "%d", e->score);
+        ui_draw_text_shadow(300, y, buf, 14, col);
+    }
+
+    if (!scoring_persisted()) {
+        ui_draw_centered_text(410, "NO SD CARD - NOTHING IS BEING SAVED", 11, C_WARN);
+    }
+    ui_draw_centered_text(440, "PRESS A", 14, C_SHIP_GLASS);
+}
+
 void rd_draw_results(const JovRun *run) {
     char buf[64];
     ui_draw_dim_overlay(fade(C_VOID, 0.80f));

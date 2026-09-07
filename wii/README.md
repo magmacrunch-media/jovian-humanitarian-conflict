@@ -32,8 +32,13 @@ The track is **not in this repo** -- it lives on the jukebox, as the web version
 also assumes -- so a bare checkout builds a game with no music and everything
 else intact. That is deliberate; see `AGENTS.md`.
 
-It **runs in Dolphin** — a full unattended run under `AUTOPILOT=1`, boot to
-shutdown — and has **not been on real hardware yet.**
+There is a **scoreboard**: ten best runs, kept on the SD card, with initials
+entered on a qualifying score. It uses magnolia's score-attack shell rather than
+a hand-rolled one.
+
+It **runs in Dolphin** — a full unattended run under `AUTOPILOT=1`, boot through
+the results card, the initials editor and the table to shutdown — and has **not
+been on real hardware yet.**
 
 ## Layout
 
@@ -55,7 +60,10 @@ wii/
 
 ## Playing
 
-Hold the Wiimote **sideways**. The D-pad flies, `1` or `2` fires, `HOME` quits.
+Hold the Wiimote **sideways**. The D-pad flies, `1` or `2` fires, `+` pauses,
+`HOME` quits. `A` is the button every card advances on — deliberately not a fire
+button, so a run that starts on `A` does not open by firing a shot you did not
+ask for.
 
 Aid convoys squawk a **double blink** and are worth 500 escorted clear.
 Hostiles are dark and worth 100 × combo. A convoy lost to hostiles costs the

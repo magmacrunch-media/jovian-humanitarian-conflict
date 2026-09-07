@@ -314,6 +314,18 @@ int main(void) {
                      "all eight effects fit in a quarter of a megabyte",
                      "%.0f KB of %.0f KB",
                      (double)(total * 2) / 1024.0, 300.0);
+
+        /* And they fit the pool main.c actually declares. This is a real
+         * bound, not a tidiness check: the pool is a fixed array and the
+         * loader hands each effect a slice of it, so an effect that grew past
+         * the total would be truncated on the console with nothing said. */
+        check_detail(total <= SFX_POOL_SAMPLES,
+                     "and inside the pool main.c reserves for them",
+                     "%.0f samples of %.0f", (double)total,
+                     (double)SFX_POOL_SAMPLES);
+        printf("          (pool %d of %d samples used, %d%% headroom)\n",
+               total, SFX_POOL_SAMPLES,
+               100 - (100 * total) / SFX_POOL_SAMPLES);
         printf("          (%d KB resident, against %d KB for the music)\n",
                (total * 2) / 1024, 6500);
     }

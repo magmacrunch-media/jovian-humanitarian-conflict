@@ -67,7 +67,7 @@
  * tenth of a second, which is fast but arguable. */
 #define AUTOPILOT_EVERY 6
 #endif
-#define AUTOPILOT_RESULTS_FRAMES 360   /* six seconds on the results card */
+#define AUTOPILOT_CARD_FRAMES 360   /* six seconds on each end-of-run card */
 
 /* -- Audio -------------------------------------------------------------
  *
@@ -90,7 +90,37 @@
 /* One pool for all eight clips rather than eight fixed buffers: the longest is
  * six times the shortest, and sizing every slot for friendlyFire would waste
  * most of it. */
-static short sfx_pool[SFX_COUNT * SFX_MAX_SAMPLES];
+/* -- Why this array is initialised, and must stay initialised ---------
+ *
+ * `= { 1 }` puts it in .data instead of .bss, and that is load-bearing.
+ *
+ * As a .bss array it broke the ENGINE'S GLYPH CACHE. Not audio -- text. Every
+ * string in the game silently stopped drawing: the HUD, the results card, all
+ * of it, while rectangles and the whole world drew perfectly. The cache
+ * reported itself healthy throughout (34 entries, 37,518 hits, 20KB of
+ * textures) because its bookkeeping was fine; the textures those entries
+ * pointed at had been overwritten.
+ *
+ * Bisected to this: writing across a large .bss array corrupts memory the
+ * allocator hands out LATER, so the glyph textures -- which are rasterised
+ * lazily on the first frame, after audio has been set up -- came back empty.
+ * Confining the writes to the first few thousand samples was fine; spreading
+ * them across 74,000 was not; moving the identical array to .data fixed it
+ * outright. So the .dol's .bss region and the heap overlap somewhere past its
+ * start.
+ *
+ * The mechanism beneath that is NOT understood -- whether it is the loader,
+ * libogc's arena calculation, or something about a .dol this size. What is
+ * measured is the trigger and the fix.
+ *
+ * Two consequences worth keeping in mind:
+ *   - Do not "tidy" the initialiser away. It costs 180KB in the .dol and buys
+ *     text that draws.
+ *   - Any OTHER large array added to this game should be initialised too, or
+ *     checked. This one was found because it broke something loud and
+ *     unrelated; a smaller one might just corrupt a score.
+ */
+static short sfx_pool[SFX_POOL_SAMPLES] = { 1 };
 static int   sfx_ok;
 static int   music_ok;
 static unsigned int music_bytes;
@@ -103,7 +133,9 @@ static void audio_bring_up(void) {
 
     for (i = 0; i < SFX_COUNT; i++) {
         short *buf = &sfx_pool[at];
-        int n = sfx_render((SfxId)i, buf, SFX_MAX_SAMPLES);
+        /* The cap is what is LEFT, not the per-effect maximum, so the pool
+         * cannot be overrun however the effects are retuned. */
+        int n = sfx_render((SfxId)i, buf, SFX_POOL_SAMPLES - at);
         if (n <= 0) continue;
         /* Bytes, not samples -- the loader takes a byte length, and passing
          * samples would play each clip for half its length and sound like a
@@ -135,8 +167,9 @@ static void audio_bring_up(void) {
     /* One line, once, at startup -- not per-frame; an EXI write is not free.
      * It exists because the failure above was invisible: every other symptom
      * of "no music" is identical to "music is quiet". Now the log says which. */
-    printf("audio: sfx=%d music=%d bytes=%u rate=%d ch=%d\n",
-           sfx_ok, music_ok, music_bytes, MUSIC_RATE, MUSIC_CHANNELS);
+    printf("audio: sfx=%d music=%d bytes=%u rate=%d ch=%d pool=%d/%d\n",
+           sfx_ok, music_ok, music_bytes, MUSIC_RATE, MUSIC_CHANNELS,
+           at, SFX_POOL_SAMPLES);
 }
 
 /* Turn a frame's cues into sound: each DISTINCT effect at most once, however
@@ -171,7 +204,16 @@ static void play_cues(const JovCue *cue) {
     if (cue->player_hit)    audio_play_sfx(SFX_PLAYER_HIT);
 }
 
-typedef enum { ST_TITLE = 0, ST_PLAYING, ST_RESULTS } State;
+/* The state machine is magnolia's, not ours.
+ *
+ * This file used to hand-roll three states. The engine ships the whole
+ * score-attack shell -- title, ready, play, pause, game over, initials on a
+ * qualifying score, then the table -- and its header makes the argument for
+ * using it: the initials editor "is fiddly enough that every game copying it
+ * would mean every game copying its bugs". It also owns the transitions, so
+ * what is left here is when a run ENDS and what each card looks like.
+ */
+static GameStateMachine gs;
 
 static JovSim sim;
 static JovRun run;
@@ -199,9 +241,14 @@ static float axis_y(void) {
     return v;
 }
 
+/* A is deliberately NOT a fire button. It is what magnolia's shell advances
+ * every card with, so a run that begins on A would begin with A still held and
+ * fire a shot the player never asked for -- on the first frame, at whatever
+ * happens to be in front. The browser hit exactly this and says so in main.js:
+ * "the Space that starts a run is still sitting in justPressed on frame 1".
+ * Held sideways, 1 and 2 are under the thumb anyway and A is not. */
 static int firing(void) {
-    return input_held(0, INPUT_BTN_1) || input_held(0, INPUT_BTN_2)
-        || input_a_held();
+    return input_held(0, INPUT_BTN_1) || input_held(0, INPUT_BTN_2);
 }
 
 #if AUTOPILOT
@@ -265,10 +312,14 @@ int main(void) {
         10,         /* max_scores */
         6           /* overscan_pct */
     };
-    State state = ST_TITLE;
-    float title_frame = 0.0f;
-    int results_frames = 0;
+    float card_frame = 0.0f;
     int status;
+#if AUTOPILOT
+    /* Only the autopilot counts frames on a card; a person presses A. Declared
+       under the guard so the ordinary build does not carry a variable it sets
+       and never reads. */
+    int results_frames = 0;
+#endif
 
     status = magnolia_init(&cfg);
     if (status == -2) return 1;   /* video never came up -- nothing is possible */
@@ -276,13 +327,18 @@ int main(void) {
     input_init();
     rd_init();
     audio_bring_up();
+    gamestate_init(&gs);
+
+    /* The initials editor scrolls 26 letters, so it wants key repeat. Without
+       it, entering "ZZZ" is seventy-eight presses. */
+    input_set_repeat(24, 5);
 
     /* The rail drifts behind the title card, so it needs to exist before a run
      * does. Reset again on every start; this is only the backdrop's. */
     start_run(1u);
 
 #if AUTOPILOT
-    state = ST_PLAYING;
+    gamestate_set(&gs, GS_PLAYING);
     start_run((unsigned int)clock_frame() + 7u);
 #endif
 
@@ -301,20 +357,7 @@ int main(void) {
         if (dt > 2.0f) dt = 2.0f;
         if (dt < 0.0f) dt = 0.0f;
 
-        switch (state) {
-        case ST_TITLE:
-            title_frame += dt;
-            jov_rail_drift(&sim.rail, title_frame);
-            if (input_a_pressed() || input_button2_pressed()
-                || input_button1_pressed()) {
-                /* Seeded from the frame the player pressed A, which is the one
-                 * genuinely unpredictable number a console offers at boot. */
-                start_run((unsigned int)clock_frame() * 2654435761u + 1u);
-                state = ST_PLAYING;
-            }
-            break;
-
-        case ST_PLAYING: {
+        if (gamestate_current(&gs) == GS_PLAYING) {
             JovCue cue;
             float ax = axis_x(), ay = axis_y();
             int fire = firing();
@@ -328,10 +371,12 @@ int main(void) {
             } else {
                 ax = 0.0f; ay = 0.0f; fire = 0;
             }
+#else
+            if (input_plus_pressed()) { gamestate_pause(&gs); }
 #endif
 
-            /* The gun is the one sound with no event behind it: firing is
-             * not something that HAPPENED to the world, so entities.js never
+            /* The gun is the one sound with no event behind it: firing is not
+             * something that HAPPENED to the world, so entities.js never
              * reported it and neither does sim.c. main.js reads the same
              * `fired` return; this reads the shot count instead, which is the
              * same fact and needs no second call into the simulation. */
@@ -344,10 +389,13 @@ int main(void) {
             jov_run_tick(&run, dt);
             play_cues(&cue);
 
+            if (cue.shake > 0.0f) rd_add_shake(cue.shake);
+            if (cue.flash > 0.0f) rd_add_flash(cue.flash, cue.flash_color);
+            rd_decay(dt);
+
 #if AUTOPILOT
-            /* A heartbeat, so a run that never reaches the results card can be
-             * told apart from one that never started. Without it, "the log is
-             * empty" has two very different causes and no way to choose. */
+            /* A per-second heartbeat, so a run that never reaches the results
+             * card can be told apart from one that never started. */
             {
                 static int last_sec = -1;
                 int sec = (int)(sim.frame / 60.0f);
@@ -361,37 +409,11 @@ int main(void) {
             }
 #endif
 
-            /* Cues are collected and, for now, only shaken with: this game
-             * ships no audio at all. The web version's six sound effects are
-             * synthesised in WebAudio and its music lives on the website's
-             * jukebox, so there was nothing to convert -- see ../AGENTS.md.
-             * The counts are here so that wiring audio later is a change in
-             * this block and nowhere else. */
-            if (cue.shake > 0.0f) rd_add_shake(cue.shake);
-            if (cue.flash > 0.0f) rd_add_flash(cue.flash, cue.flash_color);
-            rd_decay(dt);
-
             if (jov_run_over(&run, &sim.player)) {
-                state = ST_RESULTS;
-                results_frames = 0;
-            }
-            break;
-        }
-
-        case ST_RESULTS:
-            results_frames++;
+                /* The shell works out whether it qualifies and where. */
+                gamestate_end_run(&gs, run.score);
 #if AUTOPILOT
-            /* The run, in the log. A screenshot of a results card can be a
-             * screenshot of the WRONG results card -- the next run's, or
-             * whatever Dolphin had in front when the capture fired -- and
-             * neither failure announces itself. A trace cannot be mistaken for
-             * a different run, so this is what an unattended run is read from
-             * and the screenshot is only corroboration.
-             *
-             * Reaches Dolphin's log through SYS_STDIO_Report(true), which
-             * magnolia_init() calls -- and needs OSREPORT and WriteToFile in
-             * Dolphin's Logger.ini, both of which default to False. */
-            if (results_frames == 1) {
+                results_frames = 0;
                 printf("run: score=%d kills=%d escorted=%d lost=%d strikes=%d "
                        "lives=%d rank=%s frames=%.0f dist=%.0f\n",
                        run.score, run.kills, run.escorted, run.lost,
@@ -400,23 +422,77 @@ int main(void) {
                 printf("caps: events_dropped=%d waves_dropped=%d "
                        "waves_spawned=%d\n",
                        sim.events_dropped, sim.waves_dropped, sim.waves_spawned);
+                printf("score: high=%d rank=%d persisted=%d entries=%d\n",
+                       gs.is_high_score, gs.rank, scoring_persisted(),
+                       scoring_get_count());
+                {
+                    int te, th, tm, tv;
+                    unsigned long tb;
+                    text_stats(&te, &th, &tm, &tv, &tb);
+                    printf("text: enabled=%d entries=%d hits=%d misses=%d "
+                           "evictions=%d bytes=%lu\n",
+                           text_cache_enabled(), te, th, tm, tv, tb);
+                }
+#endif
             }
-
-            /* Stop driving rather than starting a second run. Note that
-             * returning from main() does NOT close Dolphin, so a scripted
-             * capture still has to close the emulator itself. */
-            if (results_frames > AUTOPILOT_RESULTS_FRAMES) {
-                printf("autopilot: done, shutting down\n");
-                magnolia_shutdown();
-                return 0;
+        } else if (gamestate_current(&gs) == GS_PAUSED) {
+            if (input_plus_pressed()) gamestate_resume(&gs);
+        } else {
+            card_frame += dt;
+            if (gamestate_current(&gs) == GS_TITLE) {
+                jov_rail_drift(&sim.rail, card_frame);
+            }
+            /* Returns 1 on the frame it enters GS_PLAYING, which is the one
+             * moment a fresh world is wanted. Seeded from the frame the player
+             * pressed A -- the one genuinely unpredictable number a console
+             * offers at boot. */
+            if (gamestate_update(&gs, run.score)) {
+                start_run((unsigned int)clock_frame() * 2654435761u + 1u);
+            }
+#if AUTOPILOT
+            /* Walk the end-of-run cards, since nobody is going to press A.
+             *
+             * The shell advances on input_a_pressed() and the autopilot has no
+             * way to synthesise one, so this drives the shell directly instead.
+             * That is the same job the hook already does for flight -- and it
+             * means the initials editor and the table are exercised by an
+             * unattended run rather than only by hand, which matters because
+             * they are the two screens a player reaches exactly once and only
+             * after doing well.
+             *
+             * Each card gets AUTOPILOT_CARD_FRAMES so a capture has time to
+             * find it. The letters are left at the default AAA: driving the
+             * editor's cursor as well would be testing magnolia's code, which
+             * has its own tests.
+             */
+            results_frames++;
+            if (results_frames > AUTOPILOT_CARD_FRAMES) {
+                results_frames = 0;
+                switch (gamestate_current(&gs)) {
+                case GS_GAME_OVER:
+                    if (gs.is_high_score) {
+                        gamestate_begin_initials(&gs);
+                        printf("autopilot: entering initials at rank %d\n", gs.rank);
+                    } else {
+                        printf("autopilot: no high score, done\n");
+                        magnolia_shutdown();
+                        return 0;
+                    }
+                    break;
+                case GS_INITIALS:
+                    gamestate_commit_initials(&gs, run.score);
+                    printf("autopilot: committed '%s', table now %d entries, "
+                           "persisted=%d\n",
+                           gs.initials, scoring_get_count(), scoring_persisted());
+                    break;
+                case GS_HIGH_SCORES:
+                default:
+                    printf("autopilot: done, shutting down\n");
+                    magnolia_shutdown();
+                    return 0;
+                }
             }
 #endif
-            if (results_frames > 30 && (input_a_pressed()
-                || input_button2_pressed() || input_button1_pressed())) {
-                start_run((unsigned int)clock_frame() * 2654435761u + 1u);
-                state = ST_PLAYING;
-            }
-            break;
         }
 
         renderer_draw_background();
@@ -427,20 +503,41 @@ int main(void) {
          * letterbox and into the overscan. The HUD is authored against the
          * whole safe area and must not be cut, so the pair is explicit here
          * rather than hidden inside the draw calls. */
-        if (state == ST_TITLE) {
-            rd_playfield_begin();
-            rd_draw_rail(&sim.rail);
-            rd_playfield_end();
-            rd_draw_title_text();
-        } else {
-            rd_playfield_begin();
-            rd_draw_rail(&sim.rail);
+        rd_playfield_begin();
+        rd_draw_rail(&sim.rail);
+        if (gamestate_current(&gs) != GS_TITLE) {
             rd_draw_contacts(&sim);
             rd_draw_player(&sim);
-            rd_playfield_end();
+        }
+        rd_playfield_end();
 
+        switch (gamestate_current(&gs)) {
+        case GS_TITLE:
+            rd_draw_title_text();
+            break;
+        case GS_READY:
             rd_draw_hud(&sim, &run);
-            if (state == ST_RESULTS) rd_draw_results(&run);
+            rd_draw_ready(card_frame);
+            break;
+        case GS_PLAYING:
+            rd_draw_hud(&sim, &run);
+            break;
+        case GS_PAUSED:
+            rd_draw_hud(&sim, &run);
+            rd_draw_paused();
+            break;
+        case GS_GAME_OVER:
+            rd_draw_hud(&sim, &run);
+            rd_draw_results(&run);
+            break;
+        case GS_INITIALS:
+            rd_draw_initials(&gs, &run);
+            break;
+        case GS_HIGH_SCORES:
+            rd_draw_scores(&gs);
+            break;
+        default:
+            break;
         }
 
         renderer_finish();
