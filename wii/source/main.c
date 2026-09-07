@@ -25,7 +25,10 @@
 
 #include <magnolia.h>
 
+#include "assets.h"
+#include "have_assets.h"
 #include "render.h"
+#include "sfx.h"
 #include "sim.h"
 
 /* -- The autopilot ----------------------------------------------------
@@ -65,6 +68,108 @@
 #define AUTOPILOT_EVERY 6
 #endif
 #define AUTOPILOT_RESULTS_FRAMES 360   /* six seconds on the results card */
+
+/* -- Audio -------------------------------------------------------------
+ *
+ * The eight effects are synthesised into RAM at startup by sfx.c and handed to
+ * magnolia as PCM; the music is one linked blob. Neither is required: a build
+ * with no music.pcm plays no music, and an ASND that will not start plays
+ * nothing at all. Both cases are silence, and silence is the one failure this
+ * game can absorb without becoming unfair -- every identification channel the
+ * premise rests on is visual, and the ping is a redundant fourth.
+ *
+ * That is worth stating because it is the opposite of makemecookies, where the
+ * track is the shift clock and losing it loses the round.
+ */
+#if MUSIC_CHANNELS == 1
+#define MUSIC_FMT AUDIO_MONO_16
+#else
+#define MUSIC_FMT AUDIO_STEREO_16
+#endif
+
+/* One pool for all eight clips rather than eight fixed buffers: the longest is
+ * six times the shortest, and sizing every slot for friendlyFire would waste
+ * most of it. */
+static short sfx_pool[SFX_COUNT * SFX_MAX_SAMPLES];
+static int   sfx_ok;
+static int   music_ok;
+static unsigned int music_bytes;
+
+static void audio_bring_up(void) {
+    int i, at = 0;
+
+    if (!audio_init()) { sfx_ok = 0; return; }
+    sfx_ok = 1;
+
+    for (i = 0; i < SFX_COUNT; i++) {
+        short *buf = &sfx_pool[at];
+        int n = sfx_render((SfxId)i, buf, SFX_MAX_SAMPLES);
+        if (n <= 0) continue;
+        /* Bytes, not samples -- the loader takes a byte length, and passing
+         * samples would play each clip for half its length and sound like a
+         * truncation bug rather than an arithmetic one. */
+        audio_load_sfx_mem_fmt(i, buf, (unsigned int)n * 2u,
+                               AUDIO_MONO_16, SFX_RATE);
+        at += n;
+    }
+
+    /* The web mix, carried across: CONFIG.MUSIC.VOLUME is 0.42 and the effects
+     * play at full. The effects are the ones carrying information -- the ping
+     * most of all -- so the track sits under them rather than beside them. */
+    audio_set_music_volume((int)(MUSIC_LEVEL * 255.0f));
+    audio_set_sfx_volume(255);
+
+    /* HAVE_MUSIC comes from the Makefile, which knows whether audio/music.pcm
+     * exists. It must NOT be `#ifdef music_pcm_size`: bin2s emits that as a
+     * static const, not a macro, so the guard is always false and the music
+     * silently never plays. That is exactly what happened, and it built and ran
+     * without a word. */
+#ifdef HAVE_MUSIC
+    music_bytes = (unsigned int)music_pcm_size;
+    if (music_bytes > 0) {
+        music_ok = audio_play_music_mem_fmt(music_pcm, music_bytes,
+                                            MUSIC_FMT, MUSIC_RATE);
+    }
+#endif
+
+    /* One line, once, at startup -- not per-frame; an EXI write is not free.
+     * It exists because the failure above was invisible: every other symptom
+     * of "no music" is identical to "music is quiet". Now the log says which. */
+    printf("audio: sfx=%d music=%d bytes=%u rate=%d ch=%d\n",
+           sfx_ok, music_ok, music_bytes, MUSIC_RATE, MUSIC_CHANNELS);
+}
+
+/* Turn a frame's cues into sound: each DISTINCT effect at most once, however
+ * many times its event fired this frame.
+ *
+ * The first version played the counts -- two kills, two explosions -- on the
+ * reasoning that collapsing them would make a busy frame quieter than a calm
+ * one. It made the busy frames clip instead. Measured off Dolphin's audio dump:
+ * 0.9% of the console's output at the rail, in runs up to 1.33ms, and every
+ * burst of it landed on a frame the heartbeat showed raising several events at
+ * once. The results card, which is music and nothing else, never clipped at
+ * all -- which is what ruled the music out.
+ *
+ * Two identical impulses started on the same frame are not two sounds. They are
+ * one sound 6dB louder, because they are sample-aligned; there is no extra
+ * information in the second, only extra amplitude. Distinct effects still all
+ * play, because those carry different information -- an escort and an explosion
+ * in the same frame are two things the player needs to know.
+ *
+ * The browser gets away with playing the counts because WebAudio mixes into a
+ * float destination with effectively unlimited headroom and its absolute levels
+ * are tiny. ASND sums into 16 bits and clamps. */
+static void play_cues(const JovCue *cue) {
+    if (!sfx_ok) return;
+    if (cue->shoot)         audio_play_sfx(SFX_SHOOT);
+    if (cue->explode)       audio_play_sfx(SFX_EXPLODE);
+    if (cue->ping)          audio_play_sfx(SFX_PING);
+    if (cue->escort)        audio_play_sfx(SFX_ESCORT);
+    if (cue->friendly_fire) audio_play_sfx(SFX_FRIENDLY_FIRE);
+    if (cue->lost)          audio_play_sfx(SFX_LOST);
+    if (cue->lock)          audio_play_sfx(SFX_LOCK);
+    if (cue->player_hit)    audio_play_sfx(SFX_PLAYER_HIT);
+}
 
 typedef enum { ST_TITLE = 0, ST_PLAYING, ST_RESULTS } State;
 
@@ -170,6 +275,7 @@ int main(void) {
 
     input_init();
     rd_init();
+    audio_bring_up();
 
     /* The rail drifts behind the title card, so it needs to exist before a run
      * does. Reset again on every start; this is only the backdrop's. */
@@ -185,6 +291,11 @@ int main(void) {
 
         input_scan();
         if (input_home_pressed()) break;
+
+        /* MINUS mutes everything, as M does in the browser. Not persisted:
+         * magnolia has prefs, but a mute that survives a reboot is a mute
+         * somebody sets by accident and then reports as broken audio. */
+        if (input_minus_pressed()) audio_set_muted(!audio_get_muted());
 
         dt = clock_dt() * 60.0f;
         if (dt > 2.0f) dt = 2.0f;
@@ -219,9 +330,19 @@ int main(void) {
             }
 #endif
 
-            jov_sim_update(&sim, ax, ay, fire, dt);
-            jov_run_resolve(&run, &sim, &cue);
+            /* The gun is the one sound with no event behind it: firing is
+             * not something that HAPPENED to the world, so entities.js never
+             * reported it and neither does sim.c. main.js reads the same
+             * `fired` return; this reads the shot count instead, which is the
+             * same fact and needs no second call into the simulation. */
+            {
+                int shots_before = sim.n_shots;
+                jov_sim_update(&sim, ax, ay, fire, dt);
+                jov_run_resolve(&run, &sim, &cue);
+                if (sim.n_shots > shots_before) cue.shoot++;
+            }
             jov_run_tick(&run, dt);
+            play_cues(&cue);
 
 #if AUTOPILOT
             /* A heartbeat, so a run that never reaches the results card can be

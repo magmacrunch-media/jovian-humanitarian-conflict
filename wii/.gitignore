@@ -4,3 +4,4 @@ sdcard/
 *.elf
 *.map
 .DS_Store
+audio/music.pcm

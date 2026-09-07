@@ -96,4 +96,4 @@ jobs:
             echo "::error file=wii/source/sim.c::the simulation must not include the engine -- the host suite links it without one"
             exit 1
           fi
-          echo "sim.c and projection.c are clean"
+          echo "sim.c, projection.c and sfx.c are clean"

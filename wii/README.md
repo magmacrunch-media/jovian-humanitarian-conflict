@@ -23,10 +23,14 @@ draws everything procedurally through the Canvas API, so `sprites/` is empty
 because there is nothing to put in it. See `AGENTS.md` for the three places this
 deviates on purpose.
 
-There is **no sound at all**, which is unusual here and is inherited rather than
-skipped: the web version's music lives on the website's jukebox and its six
-sound effects are synthesised in WebAudio, so there was no asset to convert. See
-`AGENTS.md`.
+**Sound is in**, both halves. The music is the track from the website's
+jukebox, converted by `tools/convert-audio.sh`; the effects are synthesised at
+startup by `source/sfx.c`, the way the browser synthesises them in WebAudio,
+which is why there are no effect assets to convert.
+
+The track is **not in this repo** -- it lives on the jukebox, as the web version
+also assumes -- so a bare checkout builds a game with no music and everything
+else intact. That is deliberate; see `AGENTS.md`.
 
 It **runs in Dolphin** — a full unattended run under `AUTOPILOT=1`, boot to
 shutdown — and has **not been on real hardware yet.**
@@ -42,10 +46,11 @@ wii/
 │   ├── projection.c  the pseudo-3D transform — pure maths, no engine
 │   ├── sim.c         the ship, the rail, the contacts, the IFF rules, scoring
 │   ├── render.c      draws state, decides nothing
+│   ├── sfx.c         the six sounds, synthesised -- no engine, host-tested
 │   └── main.c        the engine, the clock, the controller, the three screens
 ├── tests/            host tests, no console and no cross-compiler needed
 ├── sprites/          PNGs, embedded by bin2s (empty: nothing to put here)
-└── audio/            raw PCM, embedded by bin2s (empty, and see above)
+└── audio/            raw PCM, embedded by bin2s (music.pcm, gitignored)
 ```
 
 ## Playing
@@ -68,10 +73,13 @@ an arithmetic guarantee, not a courtesy — `../AGENTS.md` has the working, and
 make test
 ```
 
-82 checks covering the fairness invariant, the audible transponder, friendly-
-fire attribution, the price list, frame-rate independence, the projection, hit
-boxes, the rescue window, the spawner's separation guarantee, flight, and the
-fixed-array capacities. No console, no emulator, and no cross-compiler —
+140 checks across two suites. `test-simulation` covers the fairness invariant,
+the audible transponder, friendly-fire attribution, the price list, frame-rate
+independence, the projection, hit boxes, the rescue window, the spawner's
+separation guarantee, flight, and the fixed-array capacities. `test-sfx` covers
+the sounds: that none clips, that they fit together under the music, that the
+levels stay in the order the design needs, and that the ping's two notes land at
+the spacing of the visual blink they stand for. No console, no emulator, and no cross-compiler —
 `source/sim.c` and `source/projection.c` are free of libogc and GRRLIB, which is
 what makes that possible and why it has to stay that way.
 

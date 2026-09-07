@@ -63,28 +63,104 @@ difference between two of them is a real difference.
 
 A Wii is not Dolphin, so the hardware claim is still unmade.
 
-## This game ships no audio, and that is a decision the web version made
+## Audio: one linked track, six synthesised effects
 
-Every other magnolia game here converts a track. There is nothing to convert:
+The music is `audio/music.pcm`, made by `tools/convert-audio.sh` and linked into
+the `.dol` by bin2s. The effects are **not assets** -- `source/sfx.c` renders
+them into RAM at startup, the way `web/js/sfx.js` builds them in WebAudio, and
+they cost about 144KB against the track's 6.5MB. The `.dol` went from 1.7MB to
+8.2MB, all of it the track.
 
-- The **music** is on the website's jukebox, not in this repo.
-  `CONFIG.MUSIC.URL` in `web/js/config.js` is `../../music/jukebox/songs/…`, a
-  *website* path, because the track is 2.7 MB and lives there in its own right.
-  So `web/` is not standalone from this repo either — opened out of a checkout
-  the game runs silent. Roderick Tron makes the same trade.
-- The **sound effects** are not files at all. `web/js/sfx.js` synthesises all
-  six procedurally in WebAudio, deliberately not through adenosine's `AdAudio`.
+**The track is not in this repo, and the game builds and runs without it.**
+`CONFIG.MUSIC.URL` points at the website's jukebox because the file is 2.7MB
+and lives there in its own right; the web version accepts running silent out of
+a bare checkout and so does this. No `music.pcm` means no `HAVE_MUSIC`, no
+music, and a game that is otherwise complete. That is the intended degraded
+state. Every identification channel the premise rests on is visual and the ping
+is a redundant fourth, so silence costs polish and not fairness -- the opposite
+of makemecookies, where the track is the shift clock.
 
-So the web game ships exactly one audio asset and it is the one that lives
-somewhere else. Wiring sound here means either fetching the ogg out of the
-website repo and converting it the way makemecookies does, or reimplementing
-six synthesised effects against `ASND` — both real work, neither started.
+`main.c` prints one line at startup saying what came up:
 
-`jov_run_resolve()` already raises a `JovCue` per frame with a count for each
-of the eight things that make a noise, and `main.c` reads it for shake and
-flash. Wiring audio is a change inside that one block and nowhere else. That is
-why the cues are counts rather than flags: two kills in a frame must not
-silently become one.
+```
+audio: sfx=1 music=1 bytes=6503446 rate=24000 ch=1
+```
+
+It exists because the failure below was otherwise invisible.
+
+### Two build traps, both of which shipped silence and said nothing
+
+**`#ifdef music_pcm_size` is always false.** bin2s emits the size as
+`static const size_t music_pcm_size = 6503446;` -- a constant, not a
+preprocessor macro. The first version of `main.c` guarded the music on
+`#ifdef music_pcm_size`, which compiled the whole thing away. It built clean,
+ran clean, and played eighteen seconds of sound effects over digital silence.
+Nothing anywhere reported it.
+
+**`CFLAGS += -DHAVE_MUSIC=1` does not survive the autopilot build.** The obvious
+fix for the above was a `-D` from the Makefile, and a command-line
+`make CFLAGS='...'` replaces the variable wholesale along with every `+=` in the
+makefile -- and the documented way to build the autopilot is exactly such a
+command line. So the flag was present in the ordinary build, absent in the one
+that gets tested, and the two `.dol`s differed by one silent track. It is a
+generated header now, `build/have_assets.h`, which no command line can override.
+
+The moral of both: an asset that fails to link is loud, and an asset that is
+compiled out is silent in every sense.
+
+### Verifying audio you cannot hear
+
+Dolphin will dump the DSP's output to a WAV -- `DumpAudio = True` under `[DSP]`
+in `Dolphin.ini`, written to `Dump/Audio/`. That is how all of the above was
+found. Two things to know:
+
+- **Aggregate measures are trustworthy; per-second ones are not.** The share of
+  non-silent samples went from 18.3% to 85.6% when the music was fixed, which is
+  unambiguous. But the dump also shows repeated exact-zero half-seconds during
+  play, which a continuous music bed cannot produce -- so the file's time base
+  is not simply wall-clock, and any conclusion of the form "it clipped at 4.5
+  seconds" is not supported. Totals over the whole file are.
+- Turn `DumpAudio` off again. It writes a file every run.
+
+The log also proves the subsystem came up: `CRC 5dbf8bf1: ASnd chosen
+(Homebrew)` and `ASndUCode - Voice data is at ...` mean libogc's ucode was
+uploaded and voices registered. Enable `Audio` and `DSPHLE` in `Logger.ini` for
+that, and turn them off after.
+
+### The mix clips a little, and the concurrency cap is why it does not clip a lot
+
+Measured over a full autopilot run: **0.21% of output samples at the rail**,
+longest run 44 samples (0.92ms). It was 0.90% with runs of 1.33ms.
+
+What fixed most of it was not levels. It was capping `play_cues()` to **one play
+per distinct effect per frame**. The first version played the cue counts -- two
+kills, two explosions -- and a frame raising several events stacked
+sample-aligned copies of the same clip, which is not two sounds but one sound
+6dB louder. Distinct effects still all play; they carry different information.
+
+Levels came second and mattered less: `MASTER` in sfx.c went 2.4 -> 1.45 -> 1.1
+-> 0.9 and `MUSIC_LEVEL` 0.42 -> 0.30, for perhaps a quarter of the improvement
+between them. The browser can afford 0.42 for the bed because WebAudio mixes
+into float; ASND sums into 16 bits and clamps.
+
+**The residual is not zero and is not attributed.** It is concentrated in the
+busiest frames of a run. The proper fix is a limiter, which magnolia does not
+have, and adding one is an engine change rather than a game one. If somebody
+listens on hardware and it is audible, that is the thread to pull.
+
+The suite asserts what it can: that no effect clips alone, that each fits the
+headroom the music leaves, and that the four which plausibly overlap fit
+together. That last check is the one the suite did not have when the game
+clipped -- every effect passed on its own and nothing looked at the sum.
+
+### Levels belong to `web/`, like the tuning
+
+The per-sound numbers in `sfx.c` are `web/js/sfx.js`'s, unchanged, because what
+matters is the ratios: the gun fires seven times a second and must sit under
+everything, the ping must stay audible through it because it is carrying
+information, and friendly fire is the loudest thing in the game. The suite
+asserts those three relationships by name. Change a per-sound number here and
+change it there; change `MASTER` to move the whole set, which is ours alone.
 
 ## Text was the largest problem in this port, and it was fixed in the engine
 

@@ -238,6 +238,37 @@
 #define MAX_EVENTS    32
 #define POPUP_TEXT_MAX 20
 
+/* -- Audio -------------------------------------------------------------
+ *
+ * The music is one file, converted by tools/convert-audio.sh out of the
+ * website's jukebox -- it is not in this repo, and the game builds and runs
+ * silently without it. These two numbers must match what that script was run
+ * with; it prints them.
+ *
+ * Nothing in this game is timed off the music. makemecookies derives its whole
+ * shift clock from the track's length and has to check the two against each
+ * other at startup; here the track is a backdrop, the run ends on lives or
+ * strikes, and a re-encode at a different rate needs nothing but these lines.
+ */
+/* The bed, as a fraction of full scale. The browser uses 0.42
+ * (CONFIG.MUSIC.VOLUME) and can afford it: WebAudio mixes into float.
+ * ASND sums into 16 bits and clamps, and the bed competes with up to
+ * four concurrent effects for the same rail. */
+#define MUSIC_LEVEL    0.30f
+#define MUSIC_RATE     24000
+#define MUSIC_CHANNELS 1
+
+/* The resident audio budget, against the console's 24MB:
+ *
+ *   music.pcm   6351 KB   135.4s at 24kHz mono, linked into the .dol
+ *   effects      144 KB   eight clips, synthesised at startup by sfx.c
+ *
+ * The music is forty times the effects, which is the whole reason the effects
+ * are synthesised rather than recorded. If this ever has to shrink, the track
+ * is the only place worth looking -- and trimming it costs a seam somebody has
+ * to judge by ear.
+ */
+
 /* -- Palette -- the Jovian cloud decks --------------------------------
  * Warm ammonia bands over a cold void. Aid amber against hostile magenta:
  * never red/green, and the two differ in luminance as well as hue so the
