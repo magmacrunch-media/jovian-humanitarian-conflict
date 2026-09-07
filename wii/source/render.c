@@ -121,12 +121,23 @@ static void draw_giant(const JovRail *rail) {
     const float r = 78.0f;
     int i;
 
-    for (i = 0; i < 8; i++) {
-        float a = bands[i][0], b = bands[i][1];
-        /* Half-width of the disc at the widest point of this slab. */
-        float m = fabsf(a) < fabsf(b) ? fabsf(a) : fabsf(b);
-        float hw = r * sqrtf(1.0f - m * m);
-        box(cx - hw, cy + a * r, hw * 2.0f, (b - a) * r + 1.0f, cols[i]);
+    /* One strip per two design pixels, each chorded to the circle at its own
+     * height and coloured by whichever band it falls in.
+     *
+     * The first version of this drew ONE rectangle per band, sized to the
+     * band's widest point. That is not a disc: it is a stepped layer cake,
+     * widest below the equator and never closing at the bottom, and it looked
+     * exactly like one on a TV. Jupiter reads as Jupiter because of the
+     * banding, but only if the banding is on a sphere. */
+    for (i = -(int)r; i <= (int)r; i += 2) {
+        float fy = (float)i / r;                   /* -1 at the pole, 0 at the equator */
+        float hw = r * sqrtf(1.0f - fy * fy);
+        int b;
+        unsigned int col = cols[7];
+        for (b = 0; b < 8; b++) {
+            if (fy >= bands[b][0] && fy < bands[b][1]) { col = cols[b]; break; }
+        }
+        box(cx - hw, cy + (float)i, hw * 2.0f, 2.0f, col);
     }
 
     /* The Spot, sitting in the umber band below the equator. */
@@ -248,8 +259,11 @@ static void draw_contact(const JovSim *sim, const JovContact *c) {
      * point: it is the one channel that does not shrink into illegibility, so
      * a convoy is identifiable on the frame it appears. */
     if (jov_beacon_lit(c, sim->frame)) {
-        box(p.x - 2.0f, p.y - h / 2.0f - 6.0f, 4.0f, 4.0f, C_AID_BEACON);
+        /* Halo first, core over it. The other order washes the bright mark out
+         * under its own translucent halo, which is exactly the channel this is
+         * not allowed to weaken. */
         box(p.x - 4.0f, p.y - h / 2.0f - 8.0f, 8.0f, 8.0f, fade(C_AID_BEACON, 0.30f));
+        box(p.x - 2.0f, p.y - h / 2.0f - 6.0f, 4.0f, 4.0f, C_AID_BEACON);
     }
 }
 

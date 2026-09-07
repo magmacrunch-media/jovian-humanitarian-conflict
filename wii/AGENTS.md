@@ -21,15 +21,30 @@ draws the whole game — the banded giant, the streaming deck, contacts, locks,
 countdowns, the ship and the HUD — but out of rectangles, lines and circles.
 The look it has to grow into is `web/js/world.js`, `entities.js` and
 `player.js`. The one part of it that is **not** a placeholder is the
-transponder; see below.
+transponder; see below. It also has a live performance problem, which is the
+first thing to fix and has its own section.
+
+Two bugs in it were found by *looking at a frame* rather than by any test, which
+is the argument for capturing one whenever this changes. The gas giant was drawn
+as one rectangle per band sized to that band's widest point — a stepped layer
+cake, widest below the equator and never closing at the bottom, which is not a
+sphere and looked like it. And the beacon drew its bright core first and its
+translucent halo over the top, washing out the one mark that must not be weak.
+Both are fixed; neither was anything a host test could have caught.
 
 **Absent:** all audio, sprites, the scoreboard, an attract mode. magnolia
 brings scoring up in `magnolia_init()` and none of it is wired.
 
-**Not run anywhere yet:** this has never been on a console or in Dolphin. It
-compiles clean, its rules are tested, and its numbers agree with the browser's
-in distribution. Those are three different claims and none of them is the
-fourth.
+**Run in Dolphin, 2026-09-06, and not yet on real hardware.** Under
+`AUTOPILOT=1` it boots, plays a full run and shuts itself down: 17.8 seconds,
+score 4800, 3 kills, 8 convoys escorted, none lost, no strikes, rank EXEMPLARY,
+ended by running out of ships. `events_dropped=0` and `waves_dropped=0` on the
+console as well as on the host. Three separate builds produced a byte-identical
+run — `AUTOPILOT` seeds from `clock_frame()` before the loop starts, which is
+always 0, so an autopilot run is deterministic by construction and any
+difference between two of them is a real difference.
+
+A Wii is not Dolphin, so the hardware claim is still unmade.
 
 ## This game ships no audio, and that is a decision the web version made
 
@@ -53,6 +68,51 @@ of the eight things that make a noise, and `main.c` reads it for shake and
 flash. Wiring audio is a change inside that one block and nowhere else. That is
 why the cues are counts rather than flags: two kills in a frame must not
 silently become one.
+
+## GRRLIB's TTF text costs about half a millisecond a glyph, and it shows
+
+**This is the largest problem in the port and it is not a rules problem.**
+`GRRLIB_PrintfTTF` rasterises glyphs on every call with no cache, and at this
+scale that is enough to miss frames.
+
+Measured in Dolphin, 2026-09-06, by running the results card with its text and
+then with only its text removed — same binary otherwise, same 360-frame timer:
+
+| results card | 360 frames took | effective |
+|---|---|---|
+| with its five strings | 30.0 s | 12 fps |
+| text suppressed, everything else drawn | 6.005 s | 59.9 fps |
+
+Six TTF calls' difference is a five-fold frame-rate collapse. The card is
+otherwise the *cheapest* screen in the game — no particles survive on it and the
+rail is static — so nothing else can account for it. Note `ui_draw_text_shadow`
+and `ui_draw_centered_text` each draw the string **twice**, once for the shadow,
+so a "line of text" is two rasterisations.
+
+It reaches gameplay too, and this is the part that matters. Every `dt = 2.00` in
+an autopilot trace lands on a frame where the score changed — that is, on a
+frame drawing score popups:
+
+```
+t=005s dt=2.00 score=700     <- +700, several events at once
+t=006s dt=2.00 score=1200    <- +500
+t=009s dt=2.00 score=3100    <- +1400
+```
+
+dt is capped at 2.0, so those frames did not merely stutter, they **discarded
+time**: the rail advanced two frames' worth where three or more had elapsed. The
+popups appear exactly when the action is heaviest, which is the worst possible
+coupling — the game slows down in proportion to how much is happening.
+
+The fix belongs with the real renderer, and it is a cache: rasterise each glyph
+once into a texture and blit. Until then, treat text as expensive, keep it off
+the per-frame path where you can, and do not read a frame-rate problem here as a
+simulation problem — `make test` will keep passing throughout, because the rules
+are dt-correct and it is the dt that is wrong.
+
+The HUD is on the same hook: score, combo and `CONTACTS` are six rasterisations
+every gameplay frame, roughly 28 glyphs, which is most of a 60fps budget on its
+own. That gameplay holds 60fps at all is the margin, not the headroom.
 
 ## The transponder is the one thing in render.c you may not simplify
 
@@ -226,6 +286,31 @@ immediately — which is how a capture ends up showing the *next* run's empty
 scoreboard and getting filed as this one's result. **Returning from `main()`
 does not close Dolphin**, so a scripted run still has to close the emulator
 itself.
+
+### Reading an unattended run: the log, not the screenshot
+
+Under `AUTOPILOT` the game prints a per-second heartbeat and a run summary
+through `printf`. **That is what an unattended run is read from.** A screenshot
+can be of the wrong thing in three separate ways — the wrong run, the wrong
+window, or a torn grab — and none of them announces itself. A trace line cannot
+be any of those.
+
+Capturing a frame is still worth doing, because two real bugs here were found by
+looking and could not have been found any other way. Two things about it:
+
+- **`CopyFromScreen` against the hardware backend comes back torn.** Dolphin
+  presents through the GPU and the grab catches it mid-present: the first
+  attempt returned the top fifth of the frame and pure white for the rest, which
+  looks like the game having rendered a white screen. The tell is that the white
+  is *pure* `#FFFFFF`, and almost nothing in this game is.
+- **The software renderer captures cleanly.** `-v "Software Renderer"` on the
+  command line blits into an ordinary window. The frames in this repo's history
+  were taken that way. The *run* under it is not representative — it is far
+  slower than 60fps — so use it to look at a frame, never to time one.
+
+And pin the window with `SetWindowPos(HWND_TOPMOST)` rather than
+`SetForegroundWindow`, which is refused to a background process while another
+application holds focus, silently.
 
 `AUTOPILOT_EVERY` sets the reaction time in frames. Verified 2026-09-06:
 `AUTOPILOT` defaults to 0 and compiles away entirely — the default build and an

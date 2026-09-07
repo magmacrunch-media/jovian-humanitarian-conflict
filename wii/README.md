@@ -27,7 +27,8 @@ skipped: the web version's music lives on the website's jukebox and its six
 sound effects are synthesised in WebAudio, so there was no asset to convert. See
 `AGENTS.md`.
 
-It has **not been on a console or in Dolphin yet.**
+It **runs in Dolphin** — a full unattended run under `AUTOPILOT=1`, boot to
+shutdown — and has **not been on real hardware yet.**
 
 ## Layout
 

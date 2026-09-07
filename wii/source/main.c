@@ -223,6 +223,23 @@ int main(void) {
             jov_run_resolve(&run, &sim, &cue);
             jov_run_tick(&run, dt);
 
+#if AUTOPILOT
+            /* A heartbeat, so a run that never reaches the results card can be
+             * told apart from one that never started. Without it, "the log is
+             * empty" has two very different causes and no way to choose. */
+            {
+                static int last_sec = -1;
+                int sec = (int)(sim.frame / 60.0f);
+                if (sec != last_sec) {
+                    last_sec = sec;
+                    printf("t=%03ds dt=%.2f score=%d contacts=%d shots=%d "
+                           "lives=%d strikes=%d\n",
+                           sec, dt, run.score, sim.n_contacts, sim.n_shots,
+                           sim.player.lives, run.strikes);
+                }
+            }
+#endif
+
             /* Cues are collected and, for now, only shaken with: this game
              * ships no audio at all. The web version's six sound effects are
              * synthesised in WebAudio and its music lives on the website's
@@ -243,10 +260,32 @@ int main(void) {
         case ST_RESULTS:
             results_frames++;
 #if AUTOPILOT
+            /* The run, in the log. A screenshot of a results card can be a
+             * screenshot of the WRONG results card -- the next run's, or
+             * whatever Dolphin had in front when the capture fired -- and
+             * neither failure announces itself. A trace cannot be mistaken for
+             * a different run, so this is what an unattended run is read from
+             * and the screenshot is only corroboration.
+             *
+             * Reaches Dolphin's log through SYS_STDIO_Report(true), which
+             * magnolia_init() calls -- and needs OSREPORT and WriteToFile in
+             * Dolphin's Logger.ini, both of which default to False. */
+            if (results_frames == 1) {
+                printf("run: score=%d kills=%d escorted=%d lost=%d strikes=%d "
+                       "lives=%d rank=%s frames=%.0f dist=%.0f\n",
+                       run.score, run.kills, run.escorted, run.lost,
+                       run.strikes, sim.player.lives, jov_run_rank(&run),
+                       sim.frame, sim.rail.distance);
+                printf("caps: events_dropped=%d waves_dropped=%d "
+                       "waves_spawned=%d\n",
+                       sim.events_dropped, sim.waves_dropped, sim.waves_spawned);
+            }
+
             /* Stop driving rather than starting a second run. Note that
              * returning from main() does NOT close Dolphin, so a scripted
              * capture still has to close the emulator itself. */
             if (results_frames > AUTOPILOT_RESULTS_FRAMES) {
+                printf("autopilot: done, shutting down\n");
                 magnolia_shutdown();
                 return 0;
             }
