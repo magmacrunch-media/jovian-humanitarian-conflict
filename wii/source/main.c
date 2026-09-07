@@ -215,6 +215,61 @@ static void play_cues(const JovCue *cue) {
  */
 static GameStateMachine gs;
 
+/* -- Attract mode -----------------------------------------------------
+ *
+ * What the cabinet does when nobody is playing: hold the title, play itself
+ * for a while, show the best runs, and go round again. Any button drops out of
+ * it, and A starts a real game through the ordinary shell path.
+ *
+ * The demo is flown by jov_bot() -- the same function AUTOPILOT uses, and the
+ * same one the host suite flies to assert that restraint is achievable. That
+ * is the reason it lives in sim.c rather than here: an attract demo is shipped
+ * code, and this way it is shipped code that is tested.
+ *
+ * The bot is asked for a decision every ATTRACT_REACTION frames rather than
+ * every frame. At one frame it plays perfectly and the demo looks like a
+ * screensaver; at twelve it visibly hesitates, overshoots and corrects, which
+ * is what makes it read as somebody playing. It is a demo, not a showcase --
+ * a passer-by should think "I could do that", not "why would I bother".
+ */
+typedef enum { AT_TITLE = 0, AT_DEMO, AT_SCORES } AttractPhase;
+
+/* Overridable from the build, because watching a full cycle at its real
+ * cadence takes forty seconds and Dolphin's software renderer -- the only
+ * backend that captures cleanly -- runs far below 60fps, which stretches that
+ * into many minutes. Shorten them to see the whole thing:
+ *
+ *   make CFLAGS='... -DATTRACT_TITLE_FRAMES=120 -DATTRACT_DEMO_FRAMES=300'
+ */
+#ifndef ATTRACT_TITLE_FRAMES
+#define ATTRACT_TITLE_FRAMES   (10 * 60)   /* before the demo starts */
+#endif
+#ifndef ATTRACT_DEMO_FRAMES
+#define ATTRACT_DEMO_FRAMES    (22 * 60)   /* about as long as a real run */
+#endif
+#ifndef ATTRACT_SCORES_FRAMES
+#define ATTRACT_SCORES_FRAMES  (8 * 60)
+#endif
+#ifndef ATTRACT_REACTION
+#define ATTRACT_REACTION       12          /* frames between the bot's decisions */
+#endif
+
+/* Phase changes only -- a handful of lines per cycle, not per frame. An EXI
+ * write is not free and this is the title screen, which is where a console
+ * spends most of its life. */
+#ifndef ATTRACT_TRACE
+#define ATTRACT_TRACE 0
+#endif
+#if ATTRACT_TRACE
+#define AT_LOG(...) printf(__VA_ARGS__)
+#else
+#define AT_LOG(...) ((void)0)
+#endif
+
+static AttractPhase attract_phase;
+static float attract_frames;
+static int   attract_running;   /* the demo is actually being flown */
+
 static JovSim sim;
 static JovRun run;
 
@@ -251,50 +306,14 @@ static int firing(void) {
     return input_held(0, INPUT_BTN_1) || input_held(0, INPUT_BTN_2);
 }
 
-#if AUTOPILOT
-/*
- * Steer at the nearest hostile inside firing range and shoot it, and hold fire
- * whenever a convoy is in the way. Deliberately a perfect prioritiser: what it
- * is for is proving the rules run for a whole flight on real hardware, not
- * proving they are fun.
- */
-static void autopilot(float *ax, float *ay, int *fire) {
-    const JovContact *target = 0;
-    float best = 1e30f;
-    int i;
 
-    *ax = 0.0f; *ay = 0.0f; *fire = 0;
-
-    for (i = 0; i < sim.n_contacts; i++) {
-        const JovContact *c = &sim.contacts[i];
-        if (c->kind != JOV_HOSTILE || c->dead) continue;
-        if (c->z > Z_FIRE_MAX || c->z < 0.0f) continue;
-        if (c->z < best) { best = c->z; target = c; }
-    }
-    if (!target) return;
-
-    if (target->x > sim.player.x + 1.0f) *ax = 1.0f;
-    else if (target->x < sim.player.x - 1.0f) *ax = -1.0f;
-    if (target->y > sim.player.y + 1.0f) *ay = 1.0f;
-    else if (target->y < sim.player.y - 1.0f) *ay = -1.0f;
-
-    {
-        float hw, hh, mx, my;
-        jov_player_muzzle(&sim.player, &mx, &my);
-        jov_hit_box(target, &hw, &hh);
-        if (!proj_in_box(mx, my, target->x, target->y, hw, hh)) return;
-
-        /* Hold fire if any convoy nearer than the target is also in the line.
-         * This is the bot obeying the same rule the player is asked to. */
-        for (i = 0; i < sim.n_contacts; i++) {
-            const JovContact *c = &sim.contacts[i];
-            float aw, ah;
-            if (c->kind != JOV_AID || c->dead || c->z > target->z) continue;
-            jov_hit_box(c, &aw, &ah);
-            if (proj_in_box(mx, my, c->x, c->y, aw, ah)) return;
-        }
-        *fire = 1;
-    }
+/* Anything at all, so a passer-by touching the controller stops the demo.
+ * Deliberately not just A: pressing anything is a statement of interest, and a
+ * demo that carried on would be ignoring it. */
+#if !AUTOPILOT
+static int any_input(void) {
+    const InputPad *p = input_snapshot(0);
+    return p && p->pressed != 0;
 }
 #endif
 
@@ -304,6 +323,19 @@ static void start_run(unsigned int seed) {
     jov_sim_reset(&sim, seed);
     jov_run_reset(&run);
     rd_reset_stars(seed ^ 0x9E3779B9u);
+}
+
+/* Back to the title, demo abandoned. Called when somebody touches the
+ * controller and whenever a real run begins. */
+static void attract_reset(void) {
+    attract_phase = AT_TITLE;
+    attract_frames = 0.0f;
+    if (attract_running) {
+        /* The demo has been flying the real simulation, so the world is full
+         * of its contacts. Put it back to a clean rail for the title. */
+        attract_running = 0;
+        start_run(1u);
+    }
 }
 
 int main(void) {
@@ -366,7 +398,7 @@ int main(void) {
             if (((int)sim.frame) % AUTOPILOT_EVERY == 0) {
                 static float hold_x, hold_y;
                 static int hold_fire;
-                autopilot(&hold_x, &hold_y, &hold_fire);
+                jov_bot(&sim, &hold_x, &hold_y, &hold_fire);
                 ax = hold_x; ay = hold_y; fire = hold_fire;
             } else {
                 ax = 0.0f; ay = 0.0f; fire = 0;
@@ -439,14 +471,83 @@ int main(void) {
             if (input_plus_pressed()) gamestate_resume(&gs);
         } else {
             card_frame += dt;
+
+            /* The attract cycle runs only on the title -- every other card is
+             * something a player is looking at. */
             if (gamestate_current(&gs) == GS_TITLE) {
-                jov_rail_drift(&sim.rail, card_frame);
+#if !AUTOPILOT
+                if (any_input()) attract_reset();
+                attract_frames += dt;
+
+                switch (attract_phase) {
+                case AT_TITLE:
+                    if (attract_frames > ATTRACT_TITLE_FRAMES) {
+                        AT_LOG("attract: demo\n");
+                        attract_phase = AT_DEMO;
+                        attract_frames = 0.0f;
+                        attract_running = 1;
+                        /* Seeded from the clock, so the demo is a different
+                         * run each time round rather than the same scripted
+                         * one -- the whole point of having a simulation to
+                         * fly is that the attract screen never repeats. */
+                        start_run((unsigned int)clock_frame() * 2654435761u + 9u);
+                    }
+                    break;
+
+                case AT_DEMO: {
+                    JovCue cue;
+                    static float hold_x, hold_y;
+                    static int hold_fire;
+                    float ax, ay;
+                    int fire;
+
+                    if (((int)sim.frame) % ATTRACT_REACTION == 0) {
+                        jov_bot(&sim, &hold_x, &hold_y, &hold_fire);
+                    }
+                    ax = hold_x; ay = hold_y; fire = hold_fire;
+
+                    {
+                        int shots_before = sim.n_shots;
+                        jov_sim_update(&sim, ax, ay, fire, dt);
+                        jov_run_resolve(&run, &sim, &cue);
+                        if (sim.n_shots > shots_before) cue.shoot++;
+                    }
+                    jov_run_tick(&run, dt);
+                    play_cues(&cue);
+                    if (cue.shake > 0.0f) rd_add_shake(cue.shake);
+                    if (cue.flash > 0.0f) rd_add_flash(cue.flash, cue.flash_color);
+                    rd_decay(dt);
+
+                    /* Move on when the demo has run long enough OR the bot has
+                     * died -- whichever first. A demo that sat on a dead ship
+                     * would be advertising the wrong thing. */
+                    if (attract_frames > ATTRACT_DEMO_FRAMES
+                        || jov_run_over(&run, &sim.player)) {
+                        AT_LOG("attract: scores (demo scored %d)\n",
+                               run.score);
+                        attract_phase = AT_SCORES;
+                        attract_frames = 0.0f;
+                        attract_running = 0;
+                    }
+                    break;
+                }
+
+                case AT_SCORES:
+                    if (attract_frames > ATTRACT_SCORES_FRAMES) {
+                        AT_LOG("attract: title\n");
+                        attract_reset();
+                    }
+                    break;
+                }
+#endif
+                if (!attract_running) jov_rail_drift(&sim.rail, card_frame);
             }
             /* Returns 1 on the frame it enters GS_PLAYING, which is the one
              * moment a fresh world is wanted. Seeded from the frame the player
              * pressed A -- the one genuinely unpredictable number a console
              * offers at boot. */
             if (gamestate_update(&gs, run.score)) {
+                attract_reset();
                 start_run((unsigned int)clock_frame() * 2654435761u + 1u);
             }
 #if AUTOPILOT
@@ -505,7 +606,10 @@ int main(void) {
          * rather than hidden inside the draw calls. */
         rd_playfield_begin();
         rd_draw_rail(&sim.rail);
-        if (gamestate_current(&gs) != GS_TITLE) {
+        /* Contacts and the ship whenever there is a run to show -- which
+         * includes the attract demo, where the whole point is that the title
+         * screen is playing the actual game. */
+        if (gamestate_current(&gs) != GS_TITLE || attract_running) {
             rd_draw_contacts(&sim);
             rd_draw_player(&sim);
         }
@@ -513,7 +617,15 @@ int main(void) {
 
         switch (gamestate_current(&gs)) {
         case GS_TITLE:
-            rd_draw_title_text();
+            /* The title state has three faces while the cabinet attracts. */
+            if (attract_phase == AT_DEMO) {
+                rd_draw_hud(&sim, &run);
+                rd_draw_demo_banner(card_frame);
+            } else if (attract_phase == AT_SCORES) {
+                rd_draw_scores(&gs);
+            } else {
+                rd_draw_title_text();
+            }
             break;
         case GS_READY:
             rd_draw_hud(&sim, &run);

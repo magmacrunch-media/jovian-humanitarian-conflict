@@ -292,6 +292,27 @@ const JovContact *jov_sim_find(const JovSim *s, int id);
 void jov_sim_add_popup(JovSim *s, float x, float y, float z,
                        const char *text, unsigned int color);
 
+/* -- The bot -----------------------------------------------------------
+ *
+ * Steers at the nearest hostile inside firing range and shoots it, and holds
+ * fire whenever a convoy is in the line. Writes an axis and a trigger; reads
+ * nothing but the simulation. Stateless, so the caller owns how often it is
+ * asked -- which is the bot's reaction time, and the only thing separating a
+ * demo that looks played from one that looks solved.
+ *
+ * It lives here, in the engine-free half, for two reasons. It is what the
+ * ATTRACT MODE flies, so it is shipped code and not a test fixture. And being
+ * here it can be flown by `make test`, which turns "the bot never shoots a
+ * convoy" into an assertion -- and that is a claim about the GAME, not about
+ * the bot: if something that can read the transponder straight off the struct
+ * still cannot avoid convoys, the rules are not fair and no human will manage
+ * it either.
+ *
+ * What it cannot tell you is whether a person could. It never mistakes a
+ * convoy for a hostile because it never has to look.
+ */
+void jov_bot(const JovSim *s, float *ax, float *ay, int *fire);
+
 /* -- Scoring policy ----------------------------------------------------
  * What a thing is worth, and nothing about how it sounds.
  *

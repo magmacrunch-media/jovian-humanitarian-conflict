@@ -36,6 +36,11 @@ There is a **scoreboard**: ten best runs, kept on the SD card, with initials
 entered on a qualifying score. It uses magnolia's score-attack shell rather than
 a hand-rolled one.
 
+And an **attract mode**: leave it on the title and the cabinet plays itself,
+shows the best runs, and goes round again. The demo is flown by the same bot the
+host tests use to check that restraint is achievable -- so what a passer-by
+watches is shipped, tested code rather than a recording.
+
 It **runs in Dolphin** — a full unattended run under `AUTOPILOT=1`, boot through
 the results card, the initials editor and the table to shutdown — and has **not
 been on real hardware yet.**
@@ -52,6 +57,7 @@ wii/
 │   ├── sim.c         the ship, the rail, the contacts, the IFF rules, scoring
 │   ├── render.c      draws state, decides nothing
 │   ├── sfx.c         the six sounds, synthesised -- no engine, host-tested
+│   │                 (the attract bot lives in sim.c, for the same reason)
 │   └── main.c        the engine, the clock, the controller, the three screens
 ├── tests/            host tests, no console and no cross-compiler needed
 ├── sprites/          PNGs, embedded by bin2s (empty: nothing to put here)

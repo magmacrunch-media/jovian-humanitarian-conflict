@@ -96,6 +96,11 @@ void rd_draw_ready(float frame);
 
 void rd_draw_paused(void);
 
+/* The banner over an attract-mode demo. Says it is a demo and says how to stop
+ * being shown one; a cabinet that looks like it is already being played is a
+ * cabinet nobody walks up to. */
+void rd_draw_demo_banner(float frame);
+
 /* The initials editor and the table. `gs` is magnolia's state machine, which
  * holds the cursor and the letter under it. */
 void rd_draw_initials(const GameStateMachine *gs, const JovRun *run);

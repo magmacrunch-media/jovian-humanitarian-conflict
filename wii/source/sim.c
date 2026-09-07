@@ -671,6 +671,82 @@ int jov_sim_order_by_depth(const JovSim *s, int *out) {
 }
 
 /* =====================================================================
+ * The bot -- what the attract mode flies
+ * ===================================================================== */
+
+void jov_bot(const JovSim *s, float *ax, float *ay, int *fire) {
+    const JovContact *target = 0;
+    float best = 1e30f, hw, hh, mx, my;
+    int i;
+
+    *ax = 0.0f; *ay = 0.0f; *fire = 0;
+
+    /* Nearest hostile that is inside firing range and still ahead. */
+    for (i = 0; i < s->n_contacts; i++) {
+        const JovContact *c = &s->contacts[i];
+        if (c->kind != JOV_HOSTILE || c->dead) continue;
+        if (c->z > Z_FIRE_MAX || c->z < 0.0f) continue;
+        if (c->z < best) { best = c->z; target = c; }
+    }
+    if (!target) return;
+
+    /* A dead band, so the ship settles instead of oscillating either side of
+     * its target -- which reads as indecision on an attract screen. */
+    if (target->x > s->player.x + 1.0f) *ax = 1.0f;
+    else if (target->x < s->player.x - 1.0f) *ax = -1.0f;
+    if (target->y > s->player.y + 1.0f) *ay = 1.0f;
+    else if (target->y < s->player.y - 1.0f) *ay = -1.0f;
+
+    jov_player_muzzle(&s->player, &mx, &my);
+    jov_hit_box(target, &hw, &hh);
+    if (!proj_in_box(mx, my, target->x, target->y, hw, hh)) return;
+
+    /* Hold fire if any convoy NEARER than the target is in the line -- or
+     * could DRIFT into it before the shot arrives.
+     *
+     * The first version checked only the line as it stood at the moment of
+     * firing, which is what a naive player does, and it shot a convoy roughly
+     * once every hundred seconds. A shot is not instant: it takes
+     * target->z / SHOT_SPEED frames to reach the target, and a convoy drifts
+     * up to AID_DRIFT per frame in the meantime. Judging a shot safe at the
+     * trigger and having it be unsafe on arrival is a real property of the
+     * game and not a bug -- a human takes the same risk -- but an ATTRACT
+     * SCREEN that demonstrates the one thing the game punishes is a bad
+     * advert, so the bot leads.
+     *
+     * The margin is the whole drift a convoy could manage in the flight time,
+     * which is deliberately pessimistic: it assumes every convoy drifts
+     * straight at the line for the entire flight. That costs a few shots the
+     * bot could safely have taken, and buys a demo that never shows the
+     * FRIENDLY FIRE card. */
+    {
+        /* Every convoy the shot could reach, not just the ones in front of the
+         * target. A shot does not stop at what it was aimed at: if the target
+         * moves out of the way it carries on to Z_FIRE_MAX, and a convoy
+         * BEYOND the target is then squarely in its path. Checking only nearer
+         * convoys shot one about once every hundred seconds -- rarely enough
+         * to look like bad luck and often enough for an attract screen to
+         * demonstrate the one thing the game punishes.
+         *
+         * The lead is the drift a convoy could manage while the shot is in
+         * flight, computed to the convoy's own depth. Deliberately pessimistic
+         * -- it assumes the convoy drifts straight at the line the whole way.
+         * That costs the bot a few shots it could safely have taken, which is
+         * the right trade for something whose job is to look exemplary. */
+        for (i = 0; i < s->n_contacts; i++) {
+            const JovContact *c = &s->contacts[i];
+            float aw, ah, lead;
+            if (c->kind != JOV_AID || c->dead) continue;
+            if (c->z < 0.0f || c->z > Z_FIRE_MAX) continue;
+            lead = (c->z / SHOT_SPEED) * AID_DRIFT;
+            jov_hit_box(c, &aw, &ah);
+            if (proj_in_box(mx, my, c->x, c->y, aw + lead, ah)) return;
+        }
+    }
+    *fire = 1;
+}
+
+/* =====================================================================
  * Scoring policy -- web/js/main.js
  * ===================================================================== */
 

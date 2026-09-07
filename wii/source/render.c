@@ -640,6 +640,20 @@ void rd_draw_ready(float frame) {
     ui_draw_centered_text(410, "PRESS A", 16, C_SHIP_GLASS);
 }
 
+void rd_draw_demo_banner(float frame) {
+    /* Pulsed, because a static line of text over moving gameplay is the one
+     * thing an eye stops seeing. */
+    float pulse = 0.55f + 0.45f * sinf(frame * 0.06f);
+    /* Top centre and above the contact strip respectively -- the bottom-left
+     * corner already says CONTACTS and the strip itself runs along y=452, so
+     * the first version of this drew DEMO straight through both. Everything
+     * the HUD owns is at an edge; the two free spaces are the middle of the
+     * top row and the gap above the strip. */
+    ui_draw_centered_text(12, "DEMO", 14, C_AID);
+    ui_draw_centered_text(418, "PRESS A TO PLAY", 14,
+                          fade(C_SHIP_GLASS, pulse));
+}
+
 void rd_draw_paused(void) {
     ui_draw_dim_overlay(fade(C_VOID, 0.70f));
     ui_draw_centered_text(210, "PAUSED", 30, C_HUD_TEXT);

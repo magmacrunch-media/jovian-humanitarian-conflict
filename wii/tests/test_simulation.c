@@ -893,6 +893,110 @@ int main(void) {
         }
     }
 
+    /* =================================================================
+     * 8. The bot -- which is a check on the GAME, not on the bot
+     *
+     * jov_bot() is what the attract mode flies, so it is shipped code. But the
+     * reason it is tested is different: it can read the transponder straight
+     * off the struct, so it is the most favourable possible player. If IT
+     * cannot fly a run without shooting a convoy, the rules are not fair and
+     * no human is going to manage it either.
+     *
+     * That makes "the bot never commits friendly fire" an assertion about the
+     * fairness invariant, holding it from the other end from the arithmetic in
+     * section 1 -- that one says the information arrives in time, this one says
+     * acting on it is actually possible.
+     * ================================================================= */
+    section("the bot -- restraint is achievable, but not free");
+    {
+        /* Rates, not a single run. Each variation of the bot produces a
+         * completely different 6000 frames, and the counts involved are single
+         * digits, so one seed measures noise. This was learned the hard way:
+         * making the bot MORE careful appeared to triple its friendly fire,
+         * which was two different runs and not a regression. */
+        const int REACTIONS[3] = { 1, 6, 18 };
+        int r;
+
+        for (r = 0; r < 3; r++) {
+            int seed, ff = 0, aid_seen = 0, kills = 0, escorted = 0;
+
+            for (seed = 1; seed <= 10; seed++) {
+                JovSim s;
+                JovRun run;
+                JovCue cue;
+                float ax = 0.0f, ay = 0.0f;
+                int fire = 0, f, highest = 0;
+
+                jov_sim_reset(&s, (unsigned int)seed);
+                jov_run_reset(&run);
+
+                for (f = 0; f < 4000; f++) {
+                    int i;
+                    if (f % REACTIONS[r] == 0) jov_bot(&s, &ax, &ay, &fire);
+                    jov_sim_update(&s, ax, ay, fire, 1.0f);
+                    ff += count_event(&s, JOV_EV_FRIENDLY_FIRE);
+                    kills += count_event(&s, JOV_EV_HOSTILE_KILLED);
+                    escorted += count_event(&s, JOV_EV_AID_ESCORTED);
+                    for (i = 0; i < s.n_contacts; i++) {
+                        if (s.contacts[i].id > highest) {
+                            highest = s.contacts[i].id;
+                            if (s.contacts[i].kind == JOV_AID) aid_seen++;
+                        }
+                    }
+                    jov_run_resolve(&run, &s, &cue);
+                    jov_run_tick(&run, 1.0f);
+                    /* Fly past the end: the question is about the whole rail,
+                     * not about how long three ships last. */
+                    if (s.player.lives <= 0) s.player.lives = MAX_LIVES;
+                    if (run.strikes >= MAX_STRIKES) run.strikes = 0;
+                }
+            }
+
+            /* 5%. NOT zero, and that is the finding rather than a slack bound.
+             *
+             * A bot reading the transponder straight off the struct still hits
+             * roughly one convoy in fifty. The fairness invariant promises the
+             * information arrives in time to IDENTIFY a contact; it does not
+             * promise a shot judged safe when fired is still safe when it
+             * lands. Shots take about eight frames to cross the firing range,
+             * convoys drift, targets die and let a shot carry on to whatever
+             * is behind them. Measured: 2.2% at a one-frame reaction, 1.3% at
+             * six, 0.5% at eighteen -- it goes DOWN as the bot slows, because
+             * a bot that fires less has fewer accidents.
+             *
+             * If this ever climbs past 5%, something has changed about how
+             * shots travel or how convoys move, and the game has got unfair in
+             * a way the arithmetic in section 1 cannot see. */
+            check_detail(aid_seen > 0 && (100 * ff) / aid_seen < 5,
+                         "a bot with perfect information rarely shoots a convoy",
+                         "%.1f%% of %.0f convoys",
+                         aid_seen ? 100.0 * ff / aid_seen : 0.0, (double)aid_seen);
+            check_detail(kills > 10, "and is still actually shooting things",
+                         "%.0f kills at reaction %.0f",
+                         (double)kills, (double)REACTIONS[r]);
+            check_detail(escorted > 10, "while convoys get through",
+                         "%.0f escorted at reaction %.0f",
+                         (double)escorted, (double)REACTIONS[r]);
+        }
+    }
+
+    /* The bot must be STATELESS -- the attract mode and the autopilot both call
+     * it at their own cadence, and a bot that remembered anything between calls
+     * would behave differently depending on who was asking. */
+    {
+        JovSim s;
+        float ax1, ay1, ax2, ay2;
+        int f1, f2, i;
+
+        jov_sim_reset(&s, 77u);
+        for (i = 0; i < 300; i++) jov_sim_update(&s, 0.0f, 0.0f, 0, 1.0f);
+
+        jov_bot(&s, &ax1, &ay1, &f1);
+        jov_bot(&s, &ax2, &ay2, &f2);
+        check(ax1 == ax2 && ay1 == ay2 && f1 == f2,
+              "asking the bot twice about one frame gives one answer");
+    }
+
     /* -- Summary ------------------------------------------------------ */
     printf("\n%d checks, %d failed\n\n", checks, failures);
     return failures ? 1 : 0;

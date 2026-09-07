@@ -200,6 +200,71 @@ Text is now cheap enough to stop thinking about: a whole results card is 380us
 against a 16667us frame. It is not free, so do not put a thousand glyphs on
 screen, but it no longer shapes what this renderer can do.
 
+## The attract mode flies the bot, and the bot is tested
+
+Idle on the title for ten seconds and the cabinet plays itself, shows the best
+runs, and goes round again. Any button drops out; A starts a real game through
+the ordinary shell path.
+
+The demo is flown by `jov_bot()`, which lives in `sim.c` -- the engine-free
+half -- rather than in `main.c`. That placement is the point:
+
+- It is **shipped code**, not a test fixture. The attract mode is what a
+  passer-by sees.
+- It is therefore **testable**, and what it tests is the game rather than the
+  bot. `jov_bot` reads the transponder straight off the struct, so it is the
+  most favourably-informed player possible. If it could not fly a run without
+  shooting convoys, the rules would not be fair and no human would manage it.
+
+`AUTOPILOT` uses the same function, so the thing that verifies a run on hardware
+and the thing a stranger watches in an arcade are one piece of code.
+
+**The bot cannot reach zero friendly fire, and that is a finding about the
+game.** Measured across 25 seeds: 2.2% of convoys shot at a one-frame reaction,
+1.3% at six, 0.5% at eighteen. It goes DOWN as the bot slows, because a bot that
+fires less has fewer accidents. The fairness invariant promises the information
+arrives in time to *identify* a contact; it does not promise a shot judged safe
+when fired is still safe when it lands. Shots take about eight frames to cross
+the firing range, convoys drift, and a target that dies first lets the shot
+carry on to whatever is behind it.
+
+So the suite asserts a **rate under 5%**, not zero, and says why. A demo will
+therefore occasionally show FRIENDLY FIRE -- one attract cycle in the trace
+scored -300. That is honest advertising for a game about restraint, and the
+alternative would be a bot that cheats.
+
+Two things that were got wrong on the way, both worth not repeating:
+
+- **The bot was tuned against a single seed.** Making it *more* careful appeared
+  to triple its friendly fire. It had not: each change produces a completely
+  different 6000-frame run, and the counts are single digits. Rates across
+  seeds, or nothing.
+- The first version checked only convoys **nearer than the target**. A shot does
+  not stop at what it was aimed at; if the target moves it carries on to
+  `Z_FIRE_MAX`. It checks the whole lane now, and leads for the drift a convoy
+  could manage during the shot's flight.
+
+### Watching it
+
+A full cycle is forty seconds at 60fps, and Dolphin's software renderer -- the
+only backend that captures cleanly -- runs far below that, which stretches it
+into many minutes. The timings are build-overridable for exactly this:
+
+```bash
+make CFLAGS='-g -O2 -Wall $(MACHDEP) $(INCLUDE) -DATTRACT_TRACE=1 \
+    -DATTRACT_TITLE_FRAMES=120 -DATTRACT_DEMO_FRAMES=420'
+```
+
+`ATTRACT_TRACE=1` logs each phase change and the score the demo reached, which
+is how the cycle was verified: six cycles, six different scores, confirming each
+demo is a freshly seeded run rather than a scripted replay. The trace is off by
+default and per-cycle rather than per-frame -- an EXI write is not free and the
+title screen is where a console spends most of its life.
+
+`AUTOPILOT` compiles the attract mode out entirely. A binary that plays itself
+has nothing to attract with, and leaving both in would mean two things fighting
+for the title screen.
+
 ## A large .bss array broke the glyph cache, and that is not a joke
 
 **Read this before adding any big array to this game.**
