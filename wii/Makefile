@@ -79,6 +79,7 @@ endif
 
 export OFILES   := assets.o $(addsuffix .o,$(basename $(CPPFILES) $(CFILES)))
 export INCLUDE  := $(foreach dir,$(INCLUDES),-I$(TOPDIR)/$(dir)) \
+                   -I$(PORTLIBS_PATH)/ppc/include/freetype2 \
                    $(foreach dir,$(LIBDIRS),-I$(dir)/include) \
                    -I$(CURDIR) -I$(CURDIR)/$(BUILD) -I$(LIBOGC_INC)
 export LIBPATHS := $(foreach dir,$(LIBDIRS),-L$(dir)/lib) -L$(LIBOGC_LIB)

@@ -21,8 +21,9 @@ draws the whole game — the banded giant, the streaming deck, contacts, locks,
 countdowns, the ship and the HUD — but out of rectangles, lines and circles.
 The look it has to grow into is `web/js/world.js`, `entities.js` and
 `player.js`. The one part of it that is **not** a placeholder is the
-transponder; see below. It also has a live performance problem, which is the
-first thing to fix and has its own section.
+transponder; see below. The performance problem it used to have was in the
+engine's text drawing and is fixed; the section below is now history rather
+than a warning.
 
 Two bugs in it were found by *looking at a frame* rather than by any test, which
 is the argument for capturing one whenever this changes. The gas giant was drawn
@@ -69,50 +70,43 @@ flash. Wiring audio is a change inside that one block and nowhere else. That is
 why the cues are counts rather than flags: two kills in a frame must not
 silently become one.
 
-## GRRLIB's TTF text costs about half a millisecond a glyph, and it shows
+## Text was the largest problem in this port, and it was fixed in the engine
 
-**This is the largest problem in the port and it is not a rules problem.**
-`GRRLIB_PrintfTTF` rasterises glyphs on every call with no cache, and at this
-scale that is enough to miss frames.
+**Resolved 2026-09-06 in magnolia, not here.** Kept because the measurements
+are the useful part, and because the shape of the mistake recurs.
 
-Measured in Dolphin, 2026-09-06, by running the results card with its text and
-then with only its text removed — same binary otherwise, same 360-frame timer:
+`GRRLIB_PrintfTTF` asked FreeType for every glyph on every call, and that was
+the whole cost of drawing text. What it did to this game:
 
-| results card | 360 frames took | effective |
+| | before | after |
 |---|---|---|
-| with its five strings | 30.0 s | 12 fps |
-| text suppressed, everything else drawn | 6.005 s | 59.9 fps |
+| the results card, 360 frames | 30.0 s (12 fps) | 6.005 s (60 fps) |
+| gameplay frames hitting the `dt` cap | 3 in an 18 s run | 0 |
 
-Six TTF calls' difference is a five-fold frame-rate collapse. The card is
-otherwise the *cheapest* screen in the game — no particles survive on it and the
-rail is static — so nothing else can account for it. Note `ui_draw_text_shadow`
-and `ui_draw_centered_text` each draw the string **twice**, once for the shadow,
-so a "line of text" is two rasterisations.
+The second row is the one that mattered. `dt` is capped at 2.0, so a frame that
+took longer than two frames' worth **discarded time** rather than merely
+stuttering — and every capped frame in the trace landed on a frame that drew a
+score popup, which is to say the game slowed down in proportion to how much was
+happening. That is a rules-adjacent fault wearing a renderer's clothes, and
+`make test` passed throughout, because the rules are dt-correct and it was the
+dt that was wrong.
 
-It reaches gameplay too, and this is the part that matters. Every `dt = 2.00` in
-an autopilot trace lands on a frame where the score changed — that is, on a
-frame drawing score popups:
+magnolia now caches rasterised glyphs and their metrics; see its CHANGELOG.
+Nothing in this game changed for it beyond a Makefile line adding FreeType's
+headers to the include path.
 
-```
-t=005s dt=2.00 score=700     <- +700, several events at once
-t=006s dt=2.00 score=1200    <- +500
-t=009s dt=2.00 score=3100    <- +1400
-```
+**The diagnosis is the part worth keeping.** The obvious guess was per-pixel
+plotting into the framebuffer, and batching would have been the obvious fix and
+would have bought nothing. What settled it was two contrasts: the same glyph
+count at four times the pixel area cost 10% more, and `GRRLIB_WidthTTF` — which
+measures and rasterises nothing at all — cost almost as much as drawing. Cost
+per glyph, not per pixel. Both cases are in `magnolia/bench/`, and the reason
+they are kept is that a benchmark reporting only totals would have said "text is
+slow", which everybody already knew.
 
-dt is capped at 2.0, so those frames did not merely stutter, they **discarded
-time**: the rail advanced two frames' worth where three or more had elapsed. The
-popups appear exactly when the action is heaviest, which is the worst possible
-coupling — the game slows down in proportion to how much is happening.
-
-The fix belongs with the real renderer, and it is a cache: rasterise each glyph
-once into a texture and blit. Until then, treat text as expensive, keep it off
-the per-frame path where you can, and do not read a frame-rate problem here as a
-simulation problem — `make test` will keep passing throughout, because the rules
-are dt-correct and it is the dt that is wrong.
-
-The HUD is on the same hook: score, combo and `CONTACTS` are six rasterisations
-every gameplay frame, roughly 28 glyphs, which is most of a 60fps budget on its
-own. That gameplay holds 60fps at all is the margin, not the headroom.
+Text is now cheap enough to stop thinking about: a whole results card is 380us
+against a 16667us frame. It is not free, so do not put a thousand glyphs on
+screen, but it no longer shapes what this renderer can do.
 
 ## The transponder is the one thing in render.c you may not simplify
 
